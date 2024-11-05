@@ -16,6 +16,8 @@ while true; do
             counter=$((counter + 1))
             mv simple_proof.json proof_$counter.json
             echo "Proof saved as proof_$counter.json"
+            echo "Submitting proof for verification..."
+            curl -X POST -H "Content-Type: application/json" -d @proof_$counter.json $node_url:6074/verify
         else 
             echo "Request failed"
         fi
