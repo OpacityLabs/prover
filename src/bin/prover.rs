@@ -108,7 +108,7 @@ async fn main() {
 
     let prover = prover_task.await.unwrap().unwrap().start_notarize();
 
-    let redact = false;
+    let redact = true;
     let proof = if !redact {
         build_proof_without_redactions(prover).await
     } else {
@@ -200,7 +200,7 @@ async fn build_proof_with_redactions(
         prover.recv_transcript().data(),
         &[
             // Redact the value of the title. It will NOT be disclosed.
-            "Example Domain".as_bytes(),
+            "monday".as_bytes(),
         ],
     );
 
