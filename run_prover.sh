@@ -1,9 +1,16 @@
 #!/bin/bash
 
 counter=0
-while true; do
-    node_url=$(curl -s $NODE_SELECTOR | jq -r '.node_url')
+address=$(cast wallet address $PRIVATE_KEY)
+platform=kalshi
+resource=open_time
+value=10:00:00UTC
+threshold=1 
+signature=$(cast wallet sign --private-key $PRIVATE_KEY $platform$resource$value$threshold)
 
+
+while true; do
+    node_url=$(curl -X POST -H "Content-Type: application/json" -d '{"address":"'"$address"'","platform":"'"$platform"'","resource":"'"$resource"'","value":"'"$value"'","threshold":'"$threshold"',"signature":"'"$signature"'"}' $NODE_SELECTOR | jq -r '.node_url')
     if [ -z "$node_url" ] || [ "$node_url" == "null" ]; then
         echo "Failed to get a valid node_url. Retrying in 5 seconds..."
     else
