@@ -49,7 +49,7 @@ async fn main() {
     let notarization_request: NotarizationRequest =
         serde_json::from_str(NOTARIZATION_REQUEST_STR).unwrap();
 
-    let (notary_socket, session_id) = tls_prover(notary_host, notary_port).await;
+    let (notary_socket, session_id) = tls_prover(notary_host.clone(), notary_port).await;
 
     let prover_config = ProverConfig::builder()
         .id(session_id)
@@ -122,6 +122,23 @@ async fn main() {
 
     println!("Notarization completed successfully!");
     println!("The proof has been written to `simple_proof.json`");
+    // Send proof to notary for verification
+    let client = reqwest::Client::new();
+    let verify_url = format!("http://{}:6074/verify", &notary_host);
+    
+    let verify_response = client
+        .post(&verify_url)
+        .json(&proof)
+        .send()
+        .await
+        .unwrap();
+
+    println!("Verification response status: {}", verify_response.status());
+    if verify_response.status().is_success() {
+        println!("Proof successfully verified by notary");
+    } else {
+        println!("Proof verification failed");
+    }
 }
 
 /// Find the ranges of the public and private parts of a sequence.
