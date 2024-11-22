@@ -4,5 +4,6 @@ WORKDIR /opacity-simple-prover
 COPY . .
 RUN cargo build --release
 COPY /target/release/prover /usr/bin/prover
+COPY /target/release/aggregator /usr/bin/aggregator
 COPY run_prover.sh /opacity-simple-prover/run_prover.sh
 ENTRYPOINT ["chmod +x /opacity-simple-prover/run_prover.sh && /opacity-simple-prover/run_prover.sh"]

@@ -47,7 +47,6 @@ tlsn-prover = { git = "https://github.com/OpacityLabs/tlsn", package = "tlsn-pro
 notary-client = { git = "https://github.com/OpacityLabs/tlsn", package = "notary-client" }
 tls-core = { git = "https://github.com/OpacityLabs/tlsn", package = "tlsn-tls-core" }
 
-
 tokio-util = "0.7"
 hyper-util = { version = "0.1", features = ["full"] }
 
@@ -72,3 +71,5 @@ path = "prover/simple_verifier.rs"
 [[bin]]
 name = "prover"
 path = "src/bin/prover.rs"
+
+

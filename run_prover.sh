@@ -17,7 +17,9 @@ while true; do
             mv simple_proof.json proof_$counter.json
             echo "Proof saved as proof_$counter.json"
             echo "Submitting proof for verification..."
-            curl -X POST -H "Content-Type: application/json" -d @proof_$counter.json $node_url:6074/verify
+            response=$(curl -X POST -H "Content-Type: application/json" -d @proof_$counter.json $node_url:6074/verify)
+            echo "Response: $response"
+            ./target/release/aggregator $response
         else 
             echo "Request failed"
         fi
