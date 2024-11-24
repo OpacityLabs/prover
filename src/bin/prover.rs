@@ -4,7 +4,7 @@
 use http_body_util::{BodyExt, Empty};
 use hyper::{body::Bytes, Request, StatusCode};
 use hyper_util::rt::TokioIo;
-use opacity::{read_env_vars, tls_prover};
+use opacity::{tls_prover};
 use serde::{Deserialize, Serialize};
 use std::ops::Range;
 use tlsn_core::proof::TlsProof;
