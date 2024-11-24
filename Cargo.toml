@@ -46,6 +46,10 @@ tlsn-verifier = { git = "https://github.com/OpacityLabs/tlsn", package = "tlsn-v
 tlsn-prover = { git = "https://github.com/OpacityLabs/tlsn", package = "tlsn-prover" }
 notary-client = { git = "https://github.com/OpacityLabs/tlsn", package = "notary-client" }
 tls-core = { git = "https://github.com/OpacityLabs/tlsn", package = "tlsn-tls-core" }
+ark-bn254 = { version = "0.4.0" }
+ark-ec = { version = "0.4.2" }
+ark-ff = { version = "0.4.2" }
+num = { version = "0.4.3" }
 
 tokio-util = "0.7"
 hyper-util = { version = "0.1", features = ["full"] }
