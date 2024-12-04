@@ -5,6 +5,7 @@
 use ark_bn254::{G1Affine, G2Affine};
 extern crate num;
 use num::bigint::BigUint;
+use eigen_services_blsaggregation::bls_agg::{BlsAggregationServiceResponse, BlsAggregatorService};
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
