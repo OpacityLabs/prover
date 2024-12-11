@@ -7,6 +7,9 @@ resource=open_time
 value=10:00:00UTC
 threshold=1 
 signature=$(~/.foundry/bin/cast wallet sign --private-key $PRIVATE_KEY $platform$resource$value$threshold)
+echo "starting aggregator"
+./target/release/aggregator &
+echo "starting prover"
 while true; do
     node_selector_response=$(curl -X POST -H "Content-Type: application/json" -d '{
         "address": "'"$address"'",
@@ -57,7 +60,9 @@ while true; do
             
             echo "Combined proof saved as combined_proof_$counter.json"
             echo "Submitting combined proof for verification..."
-            curl -X POST -H "Content-Type: application/json" -d @combined_proof_$counter.json $node_url:6074/verify
+            response=$(curl -X POST -H "Content-Type: application/json" -d @combined_proof_$counter.json $node_url:6074/verify)
+            echo "Response: $response"
+            curl -X POST -d "$response"  http://127.0.0.1:5074/aggregate
         else 
             echo "Request failed"
         fi
