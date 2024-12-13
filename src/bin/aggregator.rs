@@ -2,7 +2,7 @@
 // extract the PublicKey and the Signature from the response (this needs the G2 also?)
 // aggregate the pk and the signature
 // once threshold is reached, send the aggregated signature to something onchain (eas maybe?)
-use ark_bn254::{G1Affine, G2Affine};
+use ark_bn254::g1::G1Affine;
 extern crate num;
 use num::bigint::BigUint;
 use eigen_services_blsaggregation::bls_agg::{BlsAggregationServiceResponse, BlsAggregatorService};
@@ -10,6 +10,7 @@ use eigen_client_avsregistry::reader::AvsRegistryChainReader;
 use eigen_logging::get_test_logger;
 use eigen_services_avsregistry::chaincaller::AvsRegistryServiceChainCaller;
 use eigen_services_operatorsinfo::operatorsinfo_inmemory::OperatorInfoServiceInMemory;
+use eigen_crypto_bls::{Signature, BlsG1Point};
 use eigen_types::{
     avs::TaskIndex,
     operator::{QuorumNum, QuorumThresholdPercentages},
@@ -27,7 +28,7 @@ use eigen_utils::{
         },
     },
 };
-use alloy_primitives::{hex, Bytes};
+use alloy_primitives::{hex, Bytes, FixedBytes};
 use alloy_provider::Provider;
 use std::time::Duration;
 
@@ -80,8 +81,9 @@ async fn aggregate_sigs(input: String) {
     println!("Aggregating signatures...");
     // println!("Received signature: {:?}", input);
     let words: Vec<&str> = input.split_whitespace().collect();
-    let mut signature: G1Affine;
-    let mut operator_id: String;
+    let mut signature: G1Affine = G1Affine::default();
+    let mut operator_id: FixedBytes<32> = FixedBytes::default();
+    let mut commitment_hash: FixedBytes<32> = FixedBytes::default();
     let mut counter = 0;
     for word in &words {
         counter += 1;
@@ -90,11 +92,20 @@ async fn aggregate_sigs(input: String) {
             println!("Signature: {:?}", signature);
         }
         if word.contains("OperatorID:") {
-            operator_id = words[counter]
+            let operator_id_string = words[counter]
             .chars()
             .filter(|c| c.is_alphanumeric())
             .collect::<String>();
+        operator_id = FixedBytes::try_from(operator_id_string.as_bytes()).unwrap();
         println!("OperatorID: {:?}", operator_id);
+        }
+        if word.contains("CommitmentHash:") {
+            let commitment_hash_string = words[counter]
+            .chars()
+            .filter(|c| c.is_alphanumeric())
+            .collect::<String>();
+        commitment_hash = FixedBytes::try_from(commitment_hash_string.as_bytes()).unwrap();
+        println!("CommitmentHash: {:?}", commitment_hash);
         }
     }
 
@@ -135,13 +146,24 @@ async fn aggregate_sigs(input: String) {
     let quorum_threshold_percentages: QuorumThresholdPercentages = vec![33];
     let time_to_expiry = Duration::from_secs(1000);
 
+    // Initialize the task
     bls_agg_service
-            .initialize_new_task(
+        .initialize_new_task(
+            task_index,
+            current_block_num as u32,
+            quorum_nums.to_vec(),
+            quorum_threshold_percentages,
+            time_to_expiry,
+        )
+        .await
+        .unwrap();
+
+        bls_agg_service
+            .process_new_signature(
                 task_index,
-                current_block_num as u32,
-                quorum_nums.to_vec(),
-                quorum_threshold_percentages,
-                time_to_expiry,
+                commitment_hash,
+                Signature::new(signature),
+                operator_id,
             )
             .await
             .unwrap();
