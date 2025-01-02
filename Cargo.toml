@@ -90,4 +90,7 @@ path = "prover/simple_verifier.rs"
 name = "prover"
 path = "src/bin/prover.rs"
 
+[[bin]]
+name = "aggregator"
+path = "src/bin/aggregator.rs"
 

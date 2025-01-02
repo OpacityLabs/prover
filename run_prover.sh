@@ -60,8 +60,13 @@ while true; do
             
             echo "Combined proof saved as combined_proof_$counter.json"
             echo "Submitting combined proof for verification..."
-            response=$(curl -X POST -H "Content-Type: application/json" -d @combined_proof_$counter.json $node_url:6074/verify)
+            response=$(curl -X POST -H "Content-Type: application/json" -d @combined_proof_$counter.json "$node_url:6074/verify")
             echo "Response: $response"
+            operator_id=$(~/.foundry/bin/cast c 0xeCd099fA5048c3738a5544347D8cBc8076E76494 "function getOperator(address)" "$address" -r https://ethereum-holesky-rpc.publicnode.com | ~/.foundry/bin/cast abi-decode -i "f(address,uint256)" | head -n 1)
+
+            echo "Operator id: $operator_id"
+            response=$(echo $response | jq --arg operator_id "$operator_id" '. + {OperatorID: $operator_id}')
+            echo "Response: $response"  
             curl -X POST -d "$response"  http://127.0.0.1:5074/aggregate
         else 
             echo "Request failed"
