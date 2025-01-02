@@ -137,7 +137,7 @@ async fn main() {
     if verify_response.status().is_success() {
         println!("Proof successfully verified by notary");
     } else {
-        println!("Proof verification failed");
+        println!("Proof verification failed with status: {}", verify_response.status());
     }
 }
 
