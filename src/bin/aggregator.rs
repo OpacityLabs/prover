@@ -1,12 +1,8 @@
-// call this from run_prover.sh passing "response" as an argument.
-// extract the PublicKey and the Signature from the response (this needs the G2 also?)
-// aggregate the pk and the signature
 // once threshold is reached, send the aggregated signature to something onchain (eas maybe?)
 use ark_bn254::g1::G1Affine;
 extern crate num;
 use num::bigint::BigUint;
 use eigen_logging::init_logger;
-use tokio::io::AsyncWriteExt;
 
 use axum::{
     routing::post,
@@ -52,62 +48,102 @@ pub async fn run_aggregator() -> eyre::Result<()> {
 
 async fn aggregate_sigs(input: String) {
     println!("Aggregating signatures...");
-    let parsed_response: serde_json::Value = serde_json::from_str(&input).unwrap();
     
-    println!("Received response: {:?}", parsed_response);
+    // First parse to get the outer JSON structure
+    let outer_parsed: serde_json::Value = match serde_json::from_str(&input) {
+        Ok(v) => v,
+        Err(e) => {
+            println!("Failed to parse outer JSON: {}", e);
+            return;
+        }
+    };
 
-    let signature = parsed_response["signature"].as_str().unwrap();
-    let operator_address = parsed_response["operator_address"].as_str().unwrap();
-    let commitment_hash = parsed_response["commitment_hash"].as_str().unwrap();
+    // Get the inner JSON string and parse it
+    let inner_json = match outer_parsed.as_str() {
+        Some(s) => s,
+        None => {
+            println!("Failed to get inner JSON string");
+            return;
+        }
+    };
 
+    // Parse the inner JSON
+    let parsed_response: serde_json::Value = match serde_json::from_str(inner_json) {
+        Ok(v) => v,
+        Err(e) => {
+            println!("Failed to parse inner JSON: {}", e);
+            return;
+        }
+    };
+    
+    println!("Parsed JSON structure: {:#?}", parsed_response);
+
+    // Now check for the fields
+    match parsed_response.get("signature") {
+        Some(sig) => println!("Found signature field: {:?}", sig),
+        None => println!("No signature field found in JSON"),
+    }
+
+    match parsed_response.get("operator_address") {
+        Some(addr) => println!("Found operator_address field: {:?}", addr),
+        None => println!("No operator_address field found in JSON"),
+    }
+
+    match parsed_response.get("commitment_hash") {
+        Some(hash) => println!("Found commitment_hash field: {:?}", hash),
+        None => println!("No commitment_hash field found in JSON"),
+    }
+
+    match parsed_response.get("task_index") {
+        Some(task_index) => println!("Found task_index field: {:?}", task_index),
+        None => println!("No task_index field found in JSON"),
+    }
+
+    let signature = parsed_response["signature"].as_str().unwrap_or("not found");
+    let operator_address = parsed_response["operator_address"].as_str().unwrap_or("not found");
+    let commitment_hash = parsed_response["commitment_hash"].as_str().unwrap_or("not found");
+    let task_index = parsed_response["task_index"]
+        .as_u64()
+        .unwrap_or(0);
+
+    println!("Extracted values:");
     println!("Signature: {}", signature);
     println!("Operator address: {}", operator_address); 
     println!("Commitment hash: {}", commitment_hash);
-    let mut file = tokio::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(commitment_hash)
-        .await
-        .unwrap();
-
-    file.write_all(format!("{}\n", signature).as_bytes())
-        .await
-        .unwrap();
-    // println!("Received signature: {:?}", input);
-    // let words: Vec<&str> = input.split_whitespace().collect();
-    // let mut signature: G1Affine = G1Affine::default();
-    // let mut operator_id: FixedBytes<32> = FixedBytes::default();
-    // let mut commitment_hash: TaskResponseDigest = FixedBytes::default();
-    // let mut counter = 0;
-    // for word in &words {
-    //     counter += 1;
-    //     if word.contains("Signature:") {
-    //         signature = parse_to_g1_affine(words[counter], words[counter+1]);
-    //         println!("Signature: {:?}", signature);
-    //     }
-    //     if word.contains("OperatorID:") {
-    //         let operator_id_string = words[counter]
-    //         .chars()
-    //         .filter(|c| c.is_alphanumeric())
-    //         .collect::<String>();
-    //     operator_id = operator_id_string.parse::<FixedBytes<32>>().unwrap();
-    //     println!("OperatorID: {:?}", operator_id);
-    //     }
-    //     if word.contains("CommitmentHash:") {
-    //         let commitment_hash_string = words[counter]
-    //         .chars()
-    //         .filter(|c| c.is_alphanumeric())
-    //         .collect::<String>();
-    //     commitment_hash = commitment_hash_string.parse::<FixedBytes<32>>().unwrap();
-    //     println!("CommitmentHash: {:?}", commitment_hash);
-
-    //     }
-    }
+    println!("Task index: {}", task_index);
 
     // let registry_coordinator_address: Address = address!("eCd099fA5048c3738a5544347D8cBc8076E76494").into(); // TODO: get from config
     // let operator_state_retriever_address: Address = address!("D5D7fB4647cE79740E6e83819EFDf43fa74F8C31").into(); // TODO: get from config
     // let http_endpoint = String::from("http://ethereum:8545"); // TODO: get from .env
     // let ws_endpoint = String::from("ws://ethereum:8545"); // TODO: get from .env
+
+    // let provider = get_provider(http_endpoint.as_str());
+    // let current_block_num = provider.get_block_number().await.unwrap();
+    // let quorum_nums = Bytes::from([0u8]);
+    // let quorum_threshold_percentages: QuorumThresholdPercentages = vec![33];
+    // let time_to_expiry = Duration::from_secs(1000);
+
+    // // Initialize the task
+    // println!("Initializing task...");
+    // println!("Task index: {:?}", task_index);
+    // println!("Current block number: {:?}", current_block_num);
+    // println!("Quorum nums: {:?}", quorum_nums);
+    // println!("Quorum threshold percentages: {:?}", quorum_threshold_percentages);
+    // println!("Time to expiry: {:?}", time_to_expiry);
+    // bls_agg_service
+    //     .initialize_new_task(
+    //         task_index,
+    //         current_block_num as u32,
+    //         quorum_nums.to_vec(),
+    //         quorum_threshold_percentages,
+    //         time_to_expiry,
+    //     )
+    //     .await
+    //     .unwrap();
+    // println!("Task initialized.");
+    }
+
+
 
     // // Create avs clients to interact with contracts deployed on anvil
     // let avs_registry_reader = AvsRegistryChainReader::new(

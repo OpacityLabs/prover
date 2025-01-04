@@ -20,6 +20,8 @@ while true; do
         "signature": "'"$signature"'"
     }' "$NODE_SELECTOR")
     node_url=$(echo $node_selector_response | jq -r '.node_url')
+    task_index=$(echo $node_selector_response | jq -r '.task_index')
+    echo "Task index: $task_index"
         
     if [ -z "$node_url" ] || [ "$node_url" == "null" ]; then
         echo "Failed to get a valid node_url. Retrying in 5 seconds..."
@@ -43,6 +45,7 @@ while true; do
             --arg value "$value" \
             --argjson threshold "$threshold" \
             --arg signature "$signature" \
+            --argjson task_index "$task_index" \
             --argjson node_selector_response "$node_selector_response" \
             --slurpfile tls_proof "proof_$counter.json" \
             '{
@@ -55,18 +58,19 @@ while true; do
                 node_url: $node_selector_response.node_url,
                 timestamp: $node_selector_response.timestamp,
                 node_selector_signature: $node_selector_response.node_selector_signature,
-                tls_proof: $tls_proof[0]
+                tls_proof: $tls_proof[0],
+                task_index: $task_index
             }' > combined_proof_$counter.json
             
             echo "Combined proof saved as combined_proof_$counter.json"
             echo "Submitting combined proof for verification..."
             response=$(curl -X POST -H "Content-Type: application/json" -d @combined_proof_$counter.json "$node_url:6074/verify")
             echo "Response: $response"
-            operator_id=$(~/.foundry/bin/cast c 0xeCd099fA5048c3738a5544347D8cBc8076E76494 "function getOperator(address)" "$address" -r https://ethereum-holesky-rpc.publicnode.com | ~/.foundry/bin/cast abi-decode -i "f(address,uint256)" | head -n 1)
+            # operator_id=$(~/.foundry/bin/cast c 0xeCd099fA5048c3738a5544347D8cBc8076E76494 "function getOperator(address)" "$address" -r https://ethereum-holesky-rpc.publicnode.com | ~/.foundry/bin/cast abi-decode -i "f(address,uint256)" | head -n 1)
 
-            echo "Operator id: $operator_id"
-            response=$(echo $response | jq --arg operator_id "$operator_id" '. + {OperatorID: $operator_id}')
-            echo "Response: $response"  
+            # echo "Operator id: $operator_id"
+            # response=$(echo $response | jq --arg operator_id "$operator_id" '. + {OperatorID: $operator_id}')
+            # echo "Response: $response"  
             curl -X POST -d "$response"  http://127.0.0.1:5074/aggregate
         else 
             echo "Request failed"
