@@ -27,6 +27,7 @@ use eigen_utils::{
         operatorstateretriever::OperatorStateRetriever
     },
 };
+// use eigen_crypto_bn254::utils::verify_message;
 use alloy_primitives::{hex, Bytes, FixedBytes, address, Address};
 use alloy_provider::Provider;
 use std::time::Duration;
@@ -45,7 +46,7 @@ use tokio::{task, time::sleep};
 
 
 
-fn parse_signature(sig: &str) -> Signature {
+fn parse_signature(sig: &str) -> G1Affine {
     // Remove parentheses and split by comma
     let sig = sig.trim_matches(|c| c == '(' || c == ')');
     let mut parts = sig.split(',');
@@ -66,8 +67,7 @@ fn parse_signature(sig: &str) -> Signature {
         .unwrap();
         
     // Create G1Affine point and convert to Signature
-    let point = G1Affine::new(x_big_int.into(), y_big_int.into());
-    Signature::new(point)
+     G1Affine::new(x_big_int.into(), y_big_int.into())
 }
 
 #[tokio::main]
@@ -246,7 +246,7 @@ async fn aggregate_sigs(input: String) {
         .unwrap();
     println!("Operator state: {:?}", operator_state);
 
-    let signature_for_agg = parse_signature(signature);
+    let signature_for_agg = Signature::new(parse_signature(signature));
 
     // Create a SignedTaskResponseDigest from the signature
     let (tx, _rx) = tokio::sync::mpsc::channel(1);
@@ -276,7 +276,7 @@ async fn aggregate_sigs(input: String) {
         .await
         .unwrap();
     
-    println!("Operator states: {:?}", operator_states);
+    // println!("Operator states: {:?}", operator_states);
     
     // Check if operator is in the quorum
     let operator_in_quorum = operator_states.iter().any(|state| {
@@ -291,13 +291,13 @@ async fn aggregate_sigs(input: String) {
     println!("Operator ID in response: {:#?}", signed_task_response.operator_id);
     println!("Task response digest: {:#?}", signed_task_response.task_response_digest);
 
-    // Try direct BLS verification
-    let direct_verify = eigen_crypto_bls::g2::verify(
-        operator_info.g2_pub_key.g2(),
-        signed_task_response.task_response_digest.as_ref(),
-        &signed_task_response.bls_signature,
-    );
-    println!("Direct BLS verification result: {:?}", direct_verify);
+    
+    // let verified = verify_message(
+    //     operator_info.g2_pub_key.g2(),
+    //     commitment_hash.as_ref() as &[u8],
+    //     parse_signature(signature)
+    // );
+    // println!("Signature verified: {:?}", verified);
 
     let signature_result = BlsAggregatorService::<AvsRegistryServiceChainCaller<AvsRegistryChainReader, OperatorInfoServiceInMemory>>::verify_signature(
         task_index as u32,
@@ -318,7 +318,7 @@ async fn aggregate_sigs(input: String) {
         .process_new_signature(
             task_index as u32,
             TaskResponseDigest::from(commitment_hash.parse::<FixedBytes<32>>().unwrap()),
-            parse_signature(signature),
+            Signature::new(parse_signature(signature)),
             FixedBytes::from_str(operator_id).unwrap(),
         )
         .await
