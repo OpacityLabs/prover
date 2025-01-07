@@ -40,6 +40,7 @@ while true; do
             # Create combined json with all fields
             jq -n \
             --arg address "$address" \
+            --arg operator_id "$operator_id" \
             --arg platform "$platform" \
             --arg resource "$resource" \
             --arg value "$value" \
@@ -50,6 +51,7 @@ while true; do
             --slurpfile tls_proof "proof_$counter.json" \
             '{
                 address: $address,
+                operator_id: $operator_id,
                 platform: $platform,
                 resource: $resource,
                 value: $value,

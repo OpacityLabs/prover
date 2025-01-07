@@ -1,16 +1,59 @@
 // once threshold is reached, send the aggregated signature to something onchain (eas maybe?)
 use ark_bn254::g1::G1Affine;
+use ark_bn254::Fr;
 extern crate num;
 use num::bigint::BigUint;
-use eigen_logging::init_logger;
+use eigen_services_blsaggregation::bls_agg::{BlsAggregationServiceResponse, BlsAggregatorService};
+use eigen_client_avsregistry::reader::{AvsRegistryChainReader, AvsRegistryReader};
+use eigen_logging::{get_logger, init_logger};
+use eigen_services_avsregistry::{chaincaller::AvsRegistryServiceChainCaller, AvsRegistryService};
+use eigen_services_operatorsinfo::{operatorsinfo_inmemory::OperatorInfoServiceInMemory, operator_info::OperatorInfoService};
+use eigen_crypto_bls::{Signature, BlsG1Point};
+use eigen_types::{
+    avs::{TaskIndex, TaskResponseDigest, SignedTaskResponseDigest},
+    operator::{QuorumNum, QuorumThresholdPercentages},
+};
+use eigen_utils::{
+    get_provider, get_signer,
+    {
+        iblssignaturechecker::{
+            IBLSSignatureChecker::{self, NonSignerStakesAndSignature},
+            BN254::G1Point,
+        },
+        registrycoordinator::{
+            IRegistryCoordinator::OperatorSetParam, IStakeRegistry::StrategyParams,
+            RegistryCoordinator,
+        },
+        operatorstateretriever::OperatorStateRetriever
+    },
+};
+use alloy_primitives::{hex, Bytes, FixedBytes, address, Address};
+use alloy_provider::Provider;
+use std::time::Duration;
+use std::str::FromStr;
 
 use axum::{
+    extract::State,
     routing::post,
+    Json,
     Router,
 };
-use tracing::info;
+use eyre::Result;
+use tracing::{info, debug};
+use tokio_util::sync::CancellationToken;
+use tokio::{task, time::sleep};
 
-pub fn parse_to_g1_affine(x: &str, y: &str) -> G1Affine {
+
+
+fn parse_signature(sig: &str) -> Signature {
+    // Remove parentheses and split by comma
+    let sig = sig.trim_matches(|c| c == '(' || c == ')');
+    let mut parts = sig.split(',');
+    
+    let x = parts.next().unwrap().trim();
+    let y = parts.next().unwrap().trim();
+    
+    // Convert string numbers to BigUint
     let x_big_int = x.chars()
         .filter(|c| c.is_numeric())
         .collect::<String>()
@@ -21,7 +64,10 @@ pub fn parse_to_g1_affine(x: &str, y: &str) -> G1Affine {
         .collect::<String>()
         .parse::<BigUint>()
         .unwrap();
-    G1Affine::new(x_big_int.into(), y_big_int.into())
+        
+    // Create G1Affine point and convert to Signature
+    let point = G1Affine::new(x_big_int.into(), y_big_int.into());
+    Signature::new(point)
 }
 
 #[tokio::main]
@@ -89,6 +135,11 @@ async fn aggregate_sigs(input: String) {
         None => println!("No operator_address field found in JSON"),
     }
 
+    match parsed_response.get("operator_id") {
+        Some(hash) => println!("Found operator_id field: {:?}", hash),
+        None => println!("No operator_id field found in JSON"),
+    }
+
     match parsed_response.get("commitment_hash") {
         Some(hash) => println!("Found commitment_hash field: {:?}", hash),
         None => println!("No commitment_hash field found in JSON"),
@@ -101,6 +152,7 @@ async fn aggregate_sigs(input: String) {
 
     let signature = parsed_response["signature"].as_str().unwrap_or("not found");
     let operator_address = parsed_response["operator_address"].as_str().unwrap_or("not found");
+    let operator_id = parsed_response["operator_id"].as_str().unwrap_or("not found");
     let commitment_hash = parsed_response["commitment_hash"].as_str().unwrap_or("not found");
     let task_index = parsed_response["task_index"]
         .as_u64()
@@ -112,163 +164,150 @@ async fn aggregate_sigs(input: String) {
     println!("Commitment hash: {}", commitment_hash);
     println!("Task index: {}", task_index);
 
-    // let registry_coordinator_address: Address = address!("eCd099fA5048c3738a5544347D8cBc8076E76494").into(); // TODO: get from config
-    // let operator_state_retriever_address: Address = address!("D5D7fB4647cE79740E6e83819EFDf43fa74F8C31").into(); // TODO: get from config
-    // let http_endpoint = String::from("http://ethereum:8545"); // TODO: get from .env
-    // let ws_endpoint = String::from("ws://ethereum:8545"); // TODO: get from .env
+    let registry_coordinator_address: Address = address!("eCd099fA5048c3738a5544347D8cBc8076E76494").into(); // TODO: get from config
+    let operator_state_retriever_address: Address = address!("D5D7fB4647cE79740E6e83819EFDf43fa74F8C31").into(); // TODO: get from config
+    let http_endpoint = String::from("http://ethereum:8545"); // TODO: get from .env
+    let ws_endpoint = String::from("ws://ethereum:8545"); // TODO: get from .env
 
-    // let provider = get_provider(http_endpoint.as_str());
-    // let current_block_num = provider.get_block_number().await.unwrap();
-    // let quorum_nums = Bytes::from([0u8]);
-    // let quorum_threshold_percentages: QuorumThresholdPercentages = vec![33];
-    // let time_to_expiry = Duration::from_secs(1000);
+    let provider = get_provider(http_endpoint.as_str());
+    let current_block_num = provider.get_block_number().await.unwrap();
+    let quorum_nums = Bytes::from([0u8]);
+    let quorum_threshold_percentages: QuorumThresholdPercentages = vec![33];
+    let time_to_expiry = Duration::from_secs(1000);
 
-    // // Initialize the task
-    // println!("Initializing task...");
-    // println!("Task index: {:?}", task_index);
-    // println!("Current block number: {:?}", current_block_num);
-    // println!("Quorum nums: {:?}", quorum_nums);
-    // println!("Quorum threshold percentages: {:?}", quorum_threshold_percentages);
-    // println!("Time to expiry: {:?}", time_to_expiry);
-    // bls_agg_service
-    //     .initialize_new_task(
-    //         task_index,
-    //         current_block_num as u32,
-    //         quorum_nums.to_vec(),
-    //         quorum_threshold_percentages,
-    //         time_to_expiry,
-    //     )
-    //     .await
-    //     .unwrap();
-    // println!("Task initialized.");
+    // Create avs clients to interact with contracts deployed on anvil
+    let avs_registry_reader = AvsRegistryChainReader::new(
+        get_logger().clone(),
+        registry_coordinator_address,
+        operator_state_retriever_address,
+        http_endpoint.clone(),
+    ).await.unwrap();
+
+    let (operators_info, _rx) = OperatorInfoServiceInMemory::new(
+        get_logger(),
+        avs_registry_reader.clone(),
+        ws_endpoint,
+    ).await.unwrap();
+
+    let cancellation_token: CancellationToken = CancellationToken::new();
+    let token_clone = cancellation_token.clone();
+    let operators_info_clone = operators_info.clone();
+    task::spawn(async move { operators_info_clone.start_service(&token_clone, 21568433, 0).await }); // TODO: what should the block number be?
+    println!("wainting 2 seconds...");
+    sleep(Duration::from_secs(2)).await;
+    // send cancel token to stop the service
+    cancellation_token.cancel();
+    
+    let avs_registry_service = AvsRegistryServiceChainCaller::new(
+        avs_registry_reader.clone(), 
+        operators_info.clone()
+    );
+
+    let bls_agg_service = BlsAggregatorService::new(avs_registry_service.clone());
+
+    // Initialize the task
+    println!("Initializing task...");
+    println!("Task index: {:?}", task_index);
+    println!("Current block number: {:?}", current_block_num);
+    println!("Quorum nums: {:?}", quorum_nums);
+    println!("Quorum threshold percentages: {:?}", quorum_threshold_percentages);
+    println!("Time to expiry: {:?}", time_to_expiry);
+    bls_agg_service
+        .initialize_new_task(
+            task_index as u32,
+            current_block_num as u32,
+            quorum_nums.to_vec(),
+            quorum_threshold_percentages,
+            time_to_expiry,
+        )
+        .await
+        .unwrap();
+    println!("Task initialized.");
+
+    let operator_id_bytes = operator_id.chars().collect::<String>().parse::<FixedBytes<32>>().unwrap();
+
+    let operator_addr = avs_registry_reader
+        .get_operator_from_id(*operator_id_bytes)
+        .await
+        .unwrap();
+    // check that operator_addr is the same as operator_address
+    if operator_addr != Address::from_str(operator_address).unwrap() {
+        println!("Operator address mismatch: {:?} != {:?}", operator_addr, operator_address);
+        return;
     }
+    println!("Operator address: {:?}", operator_addr);
+
+    // TODO: remove this
+    println!("getting operator state...");
+    // get operator state
+    let operator_state = avs_registry_service
+        .get_operators_avs_state_at_block(current_block_num as u32, &[0u8])
+        .await
+        .unwrap();
+    println!("Operator state: {:?}", operator_state);
+
+    let signature_for_agg = parse_signature(signature);
+
+    // Create a SignedTaskResponseDigest from the signature
+    let (tx, _rx) = tokio::sync::mpsc::channel(1);
+    let signed_task_response = SignedTaskResponseDigest {
+        task_response_digest: TaskResponseDigest::from(commitment_hash.parse::<FixedBytes<32>>().unwrap()),
+        bls_signature: signature_for_agg.clone(),
+        operator_id: FixedBytes::from_str(operator_id).unwrap(),
+        signature_verification_channel: tx,
+    };
+
+    println!("verifying signature...");
+    let operator_info = operators_info
+        .get_operator_info(operator_addr)
+        .await
+        .unwrap()
+        .unwrap();
+
+    // Add debug prints for verification inputs
+    println!("Verification inputs:");
+    println!("Public key: {:?}", operator_info.g2_pub_key.g2());
+    println!("Message: {:?}", signed_task_response.task_response_digest);
+    println!("Signature: {:?}", signed_task_response.bls_signature);
+
+    // Get operator state for the specific operator
+    let operator_states = avs_registry_service
+        .get_operators_avs_state_at_block(current_block_num as u32, &[0u8])
+        .await
+        .unwrap();
+    
+    println!("Operator states: {:?}", operator_states);
+    
+    // Check if operator is in the quorum
+    let operator_in_quorum = operator_states.iter().any(|state| {
+        *state.0 == signed_task_response.operator_id
+    });
+    println!("Operator in quorum: {}", operator_in_quorum);
+
+    let signature_result = BlsAggregatorService::<AvsRegistryServiceChainCaller<AvsRegistryChainReader, OperatorInfoServiceInMemory>>::verify_signature(
+        task_index as u32,
+        &signed_task_response,
+        &operator_state,
+    )
+    .await
+    .unwrap();
+    println!("Raw signature_result: {:?}", signature_result);
 
 
-
-    // // Create avs clients to interact with contracts deployed on anvil
-    // let avs_registry_reader = AvsRegistryChainReader::new(
-    //     get_logger().clone(),
-    //     registry_coordinator_address,
-    //     operator_state_retriever_address,
-    //     http_endpoint.clone(),
-    // )
-    // .await
-    // .unwrap();
-
-    // println!("registry_coordinator_address: {:?}", registry_coordinator_address);
-    // println!("operator_state_retriever_address: {:?}", operator_state_retriever_address);
-
-    // let operators_info = OperatorInfoServiceInMemory::new(
-    //     get_logger(),
-    //     avs_registry_reader.clone(),
-    //     ws_endpoint,
-    // )
-    // .await
-    // .unwrap()
-    // .0;
-    // println!("operators_info: {:?}", operators_info);
-
-    // let cancellation_token: CancellationToken = CancellationToken::new();
-    // let token_clone = cancellation_token.clone();
-    // let operators_info_clone = operators_info.clone();
-    // task::spawn(async move { operators_info_clone.start_service(&token_clone, 21495071, 0).await }); // TODO: what should the block number be?
-
-    // println!("wainting 2 seconds...");
-    // sleep(Duration::from_secs(2)).await;
-    // // send cancel token to stop the service
-    // cancellation_token.cancel();
-
-    // // Create aggregation service
-    // let avs_registry_service =
-    // AvsRegistryServiceChainCaller::new(avs_registry_reader.clone(), operators_info.clone());
-
-    // let bls_agg_service = BlsAggregatorService::new(avs_registry_service.clone());
-
-    // let provider = get_provider(http_endpoint.as_str());
-    // let current_block_num = provider.get_block_number().await.unwrap();
-    // let task_index = 1;
-    // let quorum_nums = Bytes::from([0u8]);
-    // let quorum_threshold_percentages: QuorumThresholdPercentages = vec![33];
-    // let time_to_expiry = Duration::from_secs(1000);
-
-    // // Initialize the task
-    // println!("Initializing task...");
-    // println!("Task index: {:?}", task_index);
-    // println!("Current block number: {:?}", current_block_num);
-    // println!("Quorum nums: {:?}", quorum_nums);
-    // println!("Quorum threshold percentages: {:?}", quorum_threshold_percentages);
-    // println!("Time to expiry: {:?}", time_to_expiry);
-    // bls_agg_service
-    //     .initialize_new_task(
-    //         task_index,
-    //         current_block_num as u32,
-    //         quorum_nums.to_vec(),
-    //         quorum_threshold_percentages,
-    //         time_to_expiry,
-    //     )
-    //     .await
-    //     .unwrap();
-    // println!("Task initialized.");
-
-    // // let my_operator_id = FixedBytes::from_str("0x239442a339edec7728e9d122fe7aa5c9a31529476a9c86d3c698f308e2ad9007").unwrap();
-    // // let my_operator_addr = avs_registry_reader.get_operator_from_id(*my_operator_id).await.unwrap();
-    // // println!("My operator address: {:?}", my_operator_addr);
-    // let operator_addr = avs_registry_reader.get_operator_from_id(*operator_id).await.unwrap();
-    // println!("Operator address: {:?}", operator_addr);
-
-    // let operator_info = operators_info
-    //     .get_operator_info(operator_addr)
-    //     .await;
-    // println!("Operator info: {:?}", operator_info.unwrap());
-
-    // // let my_operator_info = operators_info
-    // //     .get_operator_info(my_operator_addr)
-    // //     .await;
-    // // println!("My operator info: {:?}", my_operator_info.unwrap());
-
-
-    // println!("getting operator state...");
-    // // get operator state
-    // let operator_state = avs_registry_service
-    //     .get_operators_avs_state_at_block(current_block_num as u32, &[0u8])
-    //     .await
-    //     .unwrap();
-    // println!("Operator state: {:?}", operator_state);
-    // // println!("DO YOU SEE THIS?");
-
-    // let signature_for_agg = Signature::new(signature);
-
-    // // Create a SignedTaskResponseDigest from the signature
-    // let (tx, _rx) = tokio::sync::mpsc::channel(1);
-    // let signed_task_response = SignedTaskResponseDigest {
-    //     task_response_digest: commitment_hash,
-    //     bls_signature: signature_for_agg.clone(),
-    //     operator_id,
-    //     signature_verification_channel: tx,
-    // };
-
-    // println!("verifying signature...");
-    // let signature_result = BlsAggregatorService::<AvsRegistryServiceChainCaller<AvsRegistryChainReader, OperatorInfoServiceInMemory>>::verify_signature(
-    //         task_index,
-    //         &signed_task_response,
-    //         &operator_state,
-    //     )
-    //     .await
-    //     .unwrap();
-    // println!("signature_result: {:?}", signature_result);
-    // println!("Processing signature...");
-    // println!("Task index: {:?}", task_index);
-    // println!("Commitment hash: {:?}", commitment_hash);
-    // println!("Signature: {:?}", signature);
-    // println!("Operator ID: {:?}", operator_id);
-    // bls_agg_service
-    //     .process_new_signature(
-    //         task_index,
-    //         commitment_hash,
-    //         signature_for_agg,
-    //         operator_id,
-    //     )
-    //     .await
-    //     .unwrap();
+    println!("Processing signature...");
+    println!("Task index: {:?}", task_index);
+    println!("Commitment hash: {:?}", commitment_hash);
+    println!("Signature: {:?}", signature);
+    println!("Operator ID: {:?}", operator_id);
+    bls_agg_service
+        .process_new_signature(
+            task_index as u32,
+            TaskResponseDigest::from(commitment_hash.parse::<FixedBytes<32>>().unwrap()),
+            parse_signature(signature),
+            FixedBytes::from_str(operator_id).unwrap(),
+        )
+        .await
+        .unwrap();
+}
 
 
