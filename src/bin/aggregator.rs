@@ -284,6 +284,21 @@ async fn aggregate_sigs(input: String) {
     });
     println!("Operator in quorum: {}", operator_in_quorum);
 
+    // Add these debug prints before verification
+    println!("Detailed verification inputs:");
+    println!("Task index: {}", task_index);
+    println!("Operator states: {:#?}", operator_states);
+    println!("Operator ID in response: {:#?}", signed_task_response.operator_id);
+    println!("Task response digest: {:#?}", signed_task_response.task_response_digest);
+
+    // Try direct BLS verification
+    let direct_verify = eigen_crypto_bls::g2::verify(
+        operator_info.g2_pub_key.g2(),
+        signed_task_response.task_response_digest.as_ref(),
+        &signed_task_response.bls_signature,
+    );
+    println!("Direct BLS verification result: {:?}", direct_verify);
+
     let signature_result = BlsAggregatorService::<AvsRegistryServiceChainCaller<AvsRegistryChainReader, OperatorInfoServiceInMemory>>::verify_signature(
         task_index as u32,
         &signed_task_response,
