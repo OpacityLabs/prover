@@ -332,6 +332,20 @@ async fn aggregate_sigs(input: String) {
             println!("This could be due to: task expiry, duplicate signature, or channel error");
         }
     }
+
+    // Wait for the response from the aggregation service
+    let bls_agg_response = bls_agg_service
+    .aggregated_response_receiver
+    .lock()
+    .await
+    .recv()
+    .await
+    .unwrap()
+    .unwrap();
+    println!("BLS aggregation response: {:?}", bls_agg_response);
+
+    // Send the shutdown signal to the OperatorInfoServiceInMemory
+    cancellation_token.cancel();
 }
 
 
