@@ -315,7 +315,9 @@ async fn aggregate_sigs(input: String) {
     println!("Commitment hash: {:?}", commitment_hash);
     println!("Signature: {:?}", signature);
     println!("Operator ID: {:?}", operator_id);
-    bls_agg_service
+    
+    // Add error handling and debugging for process_new_signature
+    match bls_agg_service
         .process_new_signature(
             task_index as u32,
             TaskResponseDigest::from(commitment_hash.parse::<FixedBytes<32>>().unwrap()),
@@ -323,7 +325,13 @@ async fn aggregate_sigs(input: String) {
             FixedBytes::from_str(operator_id).unwrap(),
         )
         .await
-        .unwrap();
+    {
+        Ok(_) => println!("Successfully processed signature"),
+        Err(e) => {
+            println!("Failed to process signature: {:?}", e);
+            println!("This could be due to: task expiry, duplicate signature, or channel error");
+        }
+    }
 }
 
 
