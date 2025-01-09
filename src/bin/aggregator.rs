@@ -190,13 +190,11 @@ async fn aggregate_sigs(input: String) {
     ).await.unwrap();
 
     let cancellation_token: CancellationToken = CancellationToken::new();
-    let token_clone = cancellation_token.clone();
+    let token_clone = cancellation_token.clone(); // TODO: do we need this?
     let operators_info_clone = operators_info.clone();
     task::spawn(async move { operators_info_clone.start_service(&token_clone, 21568433, 0).await }); // TODO: what should the block number be?
     println!("wainting 2 seconds...");
     sleep(Duration::from_secs(2)).await;
-    // send cancel token to stop the service
-    cancellation_token.cancel();
     
     let avs_registry_service = AvsRegistryServiceChainCaller::new(
         avs_registry_reader.clone(), 
@@ -224,92 +222,6 @@ async fn aggregate_sigs(input: String) {
         .unwrap();
     println!("Task initialized.");
 
-    let operator_id_bytes = operator_id.chars().collect::<String>().parse::<FixedBytes<32>>().unwrap();
-
-    let operator_addr = avs_registry_reader
-        .get_operator_from_id(*operator_id_bytes)
-        .await
-        .unwrap();
-    // check that operator_addr is the same as operator_address
-    if operator_addr != Address::from_str(operator_address).unwrap() {
-        println!("Operator address mismatch: {:?} != {:?}", operator_addr, operator_address);
-        return;
-    }
-    println!("Operator address: {:?}", operator_addr);
-
-    // TODO: remove this
-    println!("getting operator state...");
-    // get operator state
-    let operator_state = avs_registry_service
-        .get_operators_avs_state_at_block(current_block_num as u32, &[0u8])
-        .await
-        .unwrap();
-    println!("Operator state: {:?}", operator_state);
-
-    let signature_for_agg = Signature::new(parse_signature(signature));
-
-    // Create a SignedTaskResponseDigest from the signature
-    let (tx, _rx) = tokio::sync::mpsc::channel(1);
-    let signed_task_response = SignedTaskResponseDigest {
-        task_response_digest: TaskResponseDigest::from(commitment_hash.parse::<FixedBytes<32>>().unwrap()),
-        bls_signature: signature_for_agg.clone(),
-        operator_id: FixedBytes::from_str(operator_id).unwrap(),
-        signature_verification_channel: tx,
-    };
-
-    println!("verifying signature...");
-    let operator_info = operators_info
-        .get_operator_info(operator_addr)
-        .await
-        .unwrap()
-        .unwrap();
-
-    // Add debug prints for verification inputs
-    println!("Verification inputs:");
-    println!("Public key: {:?}", operator_info.g2_pub_key.g2());
-    println!("Message: {:?}", signed_task_response.task_response_digest);
-    println!("Signature: {:?}", signed_task_response.bls_signature);
-
-    // Get operator state for the specific operator
-    let operator_states = avs_registry_service
-        .get_operators_avs_state_at_block(current_block_num as u32, &[0u8])
-        .await
-        .unwrap();
-    
-    // println!("Operator states: {:?}", operator_states);
-    
-    // Check if operator is in the quorum
-    let operator_in_quorum = operator_states.iter().any(|state| {
-        *state.0 == signed_task_response.operator_id
-    });
-    println!("Operator in quorum: {}", operator_in_quorum);
-
-    // Add these debug prints before verification
-    println!("Detailed verification inputs:");
-    println!("Task index: {}", task_index);
-    // println!("Operator states: {:#?}", operator_states);
-    println!("Operator ID in response: {:#?}", signed_task_response.operator_id);
-    println!("Task response digest: {:#?}", signed_task_response.task_response_digest);
-    println!("commitment_hash: {:#?}", commitment_hash.parse::<FixedBytes<32>>().unwrap());
-
-    
-    let verified = verify_message(
-        operator_info.g2_pub_key.g2(),
-        &commitment_hash.parse::<FixedBytes<32>>().unwrap().as_ref(),
-        parse_signature(signature)
-    );
-    println!("Signature verified: {:?}", verified);
-
-    let signature_result = BlsAggregatorService::<AvsRegistryServiceChainCaller<AvsRegistryChainReader, OperatorInfoServiceInMemory>>::verify_signature(
-        task_index as u32,
-        &signed_task_response,
-        &operator_state,
-    )
-    .await
-    .unwrap();
-    println!("Raw signature_result: {:?}", signature_result);
-
-
     println!("Processing signature...");
     println!("Task index: {:?}", task_index);
     println!("Commitment hash: {:?}", commitment_hash);
@@ -329,7 +241,6 @@ async fn aggregate_sigs(input: String) {
         Ok(_) => println!("Successfully processed signature"),
         Err(e) => {
             println!("Failed to process signature: {:?}", e);
-            println!("This could be due to: task expiry, duplicate signature, or channel error");
         }
     }
 
@@ -344,6 +255,7 @@ async fn aggregate_sigs(input: String) {
     .unwrap();
     println!("BLS aggregation response: {:?}", bls_agg_response);
 
+    // TODO: do we need cancellation here? (is this redundant?)
     // Send the shutdown signal to the OperatorInfoServiceInMemory
     cancellation_token.cancel();
 }
