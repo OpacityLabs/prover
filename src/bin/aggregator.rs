@@ -197,7 +197,7 @@ async fn aggregate_sigs(input: String) {
 
     // Spawn the operator info service
     task::spawn(async move { 
-        operators_info_clone.start_service(&token_clone, current_block_num as u64, 0).await;
+        let _ = operators_info_clone.start_service(&token_clone, current_block_num - 100 as u64, 0).await;
         let _ = tx.send(()).await;  // Signal that the service has stopped
     });
 
