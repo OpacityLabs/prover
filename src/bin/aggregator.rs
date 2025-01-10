@@ -189,13 +189,21 @@ async fn aggregate_sigs(input: String) {
         ws_endpoint,
     ).await.unwrap();
 
+    // Create a channel for coordinating shutdown
+    let (tx, mut rx) = tokio::sync::mpsc::channel(1);
     let cancellation_token: CancellationToken = CancellationToken::new();
-    let token_clone = cancellation_token.clone(); // TODO: do we need this?
+    let token_clone = cancellation_token.clone();
     let operators_info_clone = operators_info.clone();
-    task::spawn(async move { operators_info_clone.start_service(&token_clone, 21568433, 0).await }); // TODO: what should the block number be?
-    println!("wainting 2 seconds...");
+
+    // Spawn the operator info service
+    task::spawn(async move { 
+        operators_info_clone.start_service(&token_clone, current_block_num as u64, 0).await;
+        let _ = tx.send(()).await;  // Signal that the service has stopped
+    });
+
+    println!("waiting for services to initialize...");
     sleep(Duration::from_secs(2)).await;
-    
+
     let avs_registry_service = AvsRegistryServiceChainCaller::new(
         avs_registry_reader.clone(), 
         operators_info.clone()
@@ -228,36 +236,50 @@ async fn aggregate_sigs(input: String) {
     println!("Signature: {:?}", signature);
     println!("Operator ID: {:?}", operator_id);
     
-    // Add error handling and debugging for process_new_signature
-    match bls_agg_service
+    // Process the signature
+    let process_result = bls_agg_service
         .process_new_signature(
             task_index as u32,
             TaskResponseDigest::from(commitment_hash.parse::<FixedBytes<32>>().unwrap()),
             Signature::new(parse_signature(signature)),
             FixedBytes::from_str(operator_id).unwrap(),
         )
-        .await
-    {
-        Ok(_) => println!("Successfully processed signature"),
+        .await;
+
+    match process_result {
+        Ok(_) => {
+            println!("Successfully processed signature");
+            
+            // Wait for aggregated response with timeout
+            println!("Waiting for aggregated response...");
+            match tokio::time::timeout(
+                Duration::from_secs(10),  // 10 second timeout
+                bls_agg_service.aggregated_response_receiver.lock().await.recv()
+            ).await {
+                Ok(Some(Ok(response))) => {
+                    println!("BLS aggregation response: {:?}", response);
+                }
+                Ok(Some(Err(e))) => {
+                    println!("Error in aggregation response: {:?}", e);
+                }
+                Ok(None) => {
+                    println!("Aggregation channel closed without response");
+                }
+                Err(_) => {
+                    println!("Timeout waiting for aggregation response");
+                }
+            }
+        }
         Err(e) => {
             println!("Failed to process signature: {:?}", e);
         }
     }
 
-    // Wait for the response from the aggregation service
-    let bls_agg_response = bls_agg_service
-    .aggregated_response_receiver
-    .lock()
-    .await
-    .recv()
-    .await
-    .unwrap()
-    .unwrap();
-    println!("BLS aggregation response: {:?}", bls_agg_response);
-
-    // TODO: do we need cancellation here? (is this redundant?)
-    // Send the shutdown signal to the OperatorInfoServiceInMemory
+    // Clean shutdown
     cancellation_token.cancel();
+    if rx.recv().await.is_none() {
+        println!("Service shutdown channel closed unexpectedly");
+    }
 }
 
 
