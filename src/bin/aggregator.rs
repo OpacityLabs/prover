@@ -8,7 +8,7 @@ use eigen_client_avsregistry::reader::{AvsRegistryChainReader, AvsRegistryReader
 use eigen_logging::{get_logger, init_logger};
 use eigen_services_avsregistry::{chaincaller::AvsRegistryServiceChainCaller, AvsRegistryService};
 use eigen_services_operatorsinfo::{operatorsinfo_inmemory::OperatorInfoServiceInMemory, operator_info::OperatorInfoService};
-use eigen_crypto_bls::{Signature, BlsG1Point};
+use eigen_crypto_bls::{Signature, BlsG1Point, BlsG2Point};
 use eigen_types::{
     avs::{TaskIndex, TaskResponseDigest, SignedTaskResponseDigest},
     operator::{QuorumNum, QuorumThresholdPercentages},
@@ -32,6 +32,9 @@ use alloy_primitives::{hex, Bytes, FixedBytes, address, Address};
 use alloy_provider::Provider;
 use std::time::Duration;
 use std::str::FromStr;
+use ark_bn254::g2::G2Affine;
+use ark_ec::AffineRepr;
+use ark_bn254::Fq2;
 
 use axum::{
     extract::State,
@@ -43,8 +46,6 @@ use eyre::Result;
 use tracing::{info, debug};
 use tokio_util::sync::CancellationToken;
 use tokio::{task, time::sleep};
-
-
 
 fn parse_signature(sig: &str) -> G1Affine {
     // Remove parentheses and split by comma
@@ -92,7 +93,7 @@ pub async fn run_aggregator() -> eyre::Result<()> {
     Ok(())
 }
 
-async fn aggregate_sigs(input: String) {
+async fn aggregate_sigs(input: String) -> Json<BlsAggregationServiceResponse> {
     println!("Aggregating signatures...");
     
     // First parse to get the outer JSON structure
@@ -100,7 +101,18 @@ async fn aggregate_sigs(input: String) {
         Ok(v) => v,
         Err(e) => {
             println!("Failed to parse outer JSON: {}", e);
-            return;
+            return Json(BlsAggregationServiceResponse {
+                task_index: 0,
+                task_response_digest: TaskResponseDigest::default(),
+                non_signers_pub_keys_g1: vec![],
+                quorum_apks_g1: vec![],
+                signers_apk_g2: BlsG2Point::new(G2Affine::default()),
+                signers_agg_sig_g1: Signature::new(G1Affine::default()),
+                non_signer_quorum_bitmap_indices: vec![],
+                quorum_apk_indices: vec![],
+                total_stake_indices: vec![],
+                non_signer_stake_indices: vec![]
+            });
         }
     };
 
@@ -109,7 +121,18 @@ async fn aggregate_sigs(input: String) {
         Some(s) => s,
         None => {
             println!("Failed to get inner JSON string");
-            return;
+            return Json(BlsAggregationServiceResponse {
+                task_index: 0,
+                task_response_digest: TaskResponseDigest::default(),
+                non_signers_pub_keys_g1: vec![],
+                quorum_apks_g1: vec![],
+                signers_apk_g2: BlsG2Point::new(G2Affine::default()),
+                signers_agg_sig_g1: Signature::new(G1Affine::default()),
+                non_signer_quorum_bitmap_indices: vec![],
+                quorum_apk_indices: vec![],
+                total_stake_indices: vec![],
+                non_signer_stake_indices: vec![]
+            });
         }
     };
 
@@ -118,7 +141,18 @@ async fn aggregate_sigs(input: String) {
         Ok(v) => v,
         Err(e) => {
             println!("Failed to parse inner JSON: {}", e);
-            return;
+            return Json(BlsAggregationServiceResponse {
+                task_index: 0,
+                task_response_digest: TaskResponseDigest::default(),
+                non_signers_pub_keys_g1: vec![],
+                quorum_apks_g1: vec![],
+                signers_apk_g2: BlsG2Point::new(G2Affine::default()),
+                signers_agg_sig_g1: Signature::new(G1Affine::default()),
+                non_signer_quorum_bitmap_indices: vec![],
+                quorum_apk_indices: vec![],
+                total_stake_indices: vec![],
+                non_signer_stake_indices: vec![]
+            });
         }
     };
     
@@ -253,32 +287,80 @@ async fn aggregate_sigs(input: String) {
             // Wait for aggregated response with timeout
             println!("Waiting for aggregated response...");
             match tokio::time::timeout(
-                Duration::from_secs(10),  // 10 second timeout
+                Duration::from_secs(10),
                 bls_agg_service.aggregated_response_receiver.lock().await.recv()
             ).await {
                 Ok(Some(Ok(response))) => {
                     println!("BLS aggregation response: {:?}", response);
+                    cancellation_token.cancel();  // Clean shutdown before returning
+                    Json(response)
                 }
                 Ok(Some(Err(e))) => {
                     println!("Error in aggregation response: {:?}", e);
+                    cancellation_token.cancel();
+                    Json(BlsAggregationServiceResponse {
+                        task_index: 0,
+                        task_response_digest: TaskResponseDigest::default(),
+                        non_signers_pub_keys_g1: vec![],
+                        quorum_apks_g1: vec![],
+                        signers_apk_g2: BlsG2Point::new(G2Affine::default()),
+                        signers_agg_sig_g1: Signature::new(G1Affine::default()),
+                        non_signer_quorum_bitmap_indices: vec![],
+                        quorum_apk_indices: vec![],
+                        total_stake_indices: vec![],
+                        non_signer_stake_indices: vec![]
+                    })
                 }
                 Ok(None) => {
                     println!("Aggregation channel closed without response");
+                    cancellation_token.cancel();
+                    Json(BlsAggregationServiceResponse {
+                        task_index: 0,
+                        task_response_digest: TaskResponseDigest::default(),
+                        non_signers_pub_keys_g1: vec![],
+                        quorum_apks_g1: vec![],
+                        signers_apk_g2: BlsG2Point::new(G2Affine::default()),
+                        signers_agg_sig_g1: Signature::new(G1Affine::default()),
+                        non_signer_quorum_bitmap_indices: vec![],
+                        quorum_apk_indices: vec![],
+                        total_stake_indices: vec![],
+                        non_signer_stake_indices: vec![]
+                    })
                 }
                 Err(_) => {
                     println!("Timeout waiting for aggregation response");
+                    cancellation_token.cancel();
+                    Json(BlsAggregationServiceResponse {
+                        task_index: 0,
+                        task_response_digest: TaskResponseDigest::default(),
+                        non_signers_pub_keys_g1: vec![],
+                        quorum_apks_g1: vec![],
+                        signers_apk_g2: BlsG2Point::new(G2Affine::default()),
+                        signers_agg_sig_g1: Signature::new(G1Affine::default()),
+                        non_signer_quorum_bitmap_indices: vec![],
+                        quorum_apk_indices: vec![],
+                        total_stake_indices: vec![],
+                        non_signer_stake_indices: vec![]
+                    })
                 }
             }
         }
         Err(e) => {
             println!("Failed to process signature: {:?}", e);
+            cancellation_token.cancel();
+            Json(BlsAggregationServiceResponse {
+                task_index: 0,
+                task_response_digest: TaskResponseDigest::default(),
+                non_signers_pub_keys_g1: vec![],
+                quorum_apks_g1: vec![],
+                signers_apk_g2: BlsG2Point::new(G2Affine::default()),
+                signers_agg_sig_g1: Signature::new(G1Affine::default()),
+                non_signer_quorum_bitmap_indices: vec![],
+                quorum_apk_indices: vec![],
+                total_stake_indices: vec![],
+                non_signer_stake_indices: vec![]
+            })
         }
-    }
-
-    // Clean shutdown
-    cancellation_token.cancel();
-    if rx.recv().await.is_none() {
-        println!("Service shutdown channel closed unexpectedly");
     }
 }
 
