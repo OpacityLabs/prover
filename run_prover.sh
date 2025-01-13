@@ -67,13 +67,48 @@ while true; do
             echo "Combined proof saved as combined_proof_$counter.json"
             echo "Submitting combined proof for verification..."
             response=$(curl -X POST -H "Content-Type: application/json" -d @combined_proof_$counter.json "$node_url:6074/verify")
-            echo "Response: $response"
-            # operator_id=$(~/.foundry/bin/cast c 0xeCd099fA5048c3738a5544347D8cBc8076E76494 "function getOperator(address)" "$address" -r https://ethereum-holesky-rpc.publicnode.com | ~/.foundry/bin/cast abi-decode -i "f(address,uint256)" | head -n 1)
+            echo "Verify Response: $response"
 
-            # echo "Operator id: $operator_id"
-            # response=$(echo $response | jq --arg operator_id "$operator_id" '. + {OperatorID: $operator_id}')
-            # echo "Response: $response"  
-            curl -X POST -d "$response"  http://127.0.0.1:5074/aggregate
+            # Send to aggregator and capture its response
+            aggregator_response=$(curl -X POST -d "$response" http://127.0.0.1:5074/aggregate)
+            echo "Aggregator Response: $aggregator_response"
+
+            # Parse the BlsAggregationServiceResponse
+            task_index=$(echo $aggregator_response | jq -r '.task_index')
+            task_response_digest=$(echo $aggregator_response | jq -r '.task_response_digest')
+            signers_agg_sig=$(echo $aggregator_response | jq -r '.signers_agg_sig_g1.g1_point')
+            signers_apk_g2=$(echo $aggregator_response | jq -r '.signers_apk_g2')
+            quorum_apks_g1=$(echo $aggregator_response | jq -r '.quorum_apks_g1[0]')
+
+            # Extract coordinates from the arrays
+            SIG_G1_X=$(echo $signers_agg_sig | jq -r '.[0:32] | join(",")' | tr -d '[:space:]')
+            SIG_G1_Y=$(echo $signers_agg_sig | jq -r '.[32:64] | join(",")' | tr -d '[:space:]')
+            
+            APK_G1_X=$(echo $quorum_apks_g1 | jq -r '.[0:32] | join(",")' | tr -d '[:space:]')
+            APK_G1_Y=$(echo $quorum_apks_g1 | jq -r '.[32:64] | join(",")' | tr -d '[:space:]')
+            
+            APK_G2_X1=$(echo $signers_apk_g2 | jq -r '.[0:32] | join(",")' | tr -d '[:space:]')
+            APK_G2_X2=$(echo $signers_apk_g2 | jq -r '.[32:64] | join(",")' | tr -d '[:space:]')
+            APK_G2_Y1=$(echo $signers_apk_g2 | jq -r '.[64:96] | join(",")' | tr -d '[:space:]')
+            APK_G2_Y2=$(echo $signers_apk_g2 | jq -r '.[96:128] | join(",")' | tr -d '[:space:]')
+
+            MSG_HASH=$task_response_digest
+
+            echo "Extracted values for cast call:"
+            echo "MSG_HASH: $MSG_HASH"
+            echo "APK_G1: ($APK_G1_X,$APK_G1_Y)"
+            echo "APK_G2: ([$APK_G2_X2,$APK_G2_X1],[$APK_G2_Y2,$APK_G2_Y1])"
+            echo "SIG_G1: ($SIG_G1_X,$SIG_G1_Y)"
+
+            # Execute cast call
+            sig_verification=$(~/.foundry/bin/cast call 0xb7ba8bbc36AA5684fC44D02aD666dF8E23BEEbF8 --rpc-url http://ethereum:8545 \
+                "trySignatureAndApkVerification(bytes32,(uint256,uint256),(uint256[2],uint256[2]),(uint256,uint256))(bool,bool)" \
+                $MSG_HASH \
+                "($APK_G1_X,$APK_G1_Y)" \
+                "([$APK_G2_X2,$APK_G2_X1],[$APK_G2_Y2,$APK_G2_Y1])" \
+                "($SIG_G1_X,$SIG_G1_Y)")
+            echo "Signature Verification: $sig_verification"
+
         else 
             echo "Request failed"
         fi
