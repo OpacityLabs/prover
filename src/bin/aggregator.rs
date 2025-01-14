@@ -22,6 +22,8 @@ use std::time::Duration;
 use std::str::FromStr;
 use ark_bn254::g2::G2Affine;
 use std::sync::Arc;
+use ark_ec::AffineRepr;
+use ark_ff::PrimeField;
 
 use axum::{
     routing::post,
@@ -78,7 +80,7 @@ pub async fn run_aggregator() -> eyre::Result<()> {
     Ok(())
 }
 
-async fn aggregate_sigs(input: String) -> Json<BlsAggregationServiceResponse> {
+async fn aggregate_sigs(input: String) -> Json<serde_json::Value> {
     println!("Aggregating signatures...");
     
     // First parse to get the outer JSON structure
@@ -86,18 +88,7 @@ async fn aggregate_sigs(input: String) -> Json<BlsAggregationServiceResponse> {
         Ok(v) => v,
         Err(e) => {
             println!("Failed to parse outer JSON: {}", e);
-            return Json(BlsAggregationServiceResponse {
-                task_index: 0,
-                task_response_digest: TaskResponseDigest::default(),
-                non_signers_pub_keys_g1: vec![],
-                quorum_apks_g1: vec![],
-                signers_apk_g2: BlsG2Point::new(G2Affine::default()),
-                signers_agg_sig_g1: Signature::new(G1Affine::default()),
-                non_signer_quorum_bitmap_indices: vec![],
-                quorum_apk_indices: vec![],
-                total_stake_indices: vec![],
-                non_signer_stake_indices: vec![]
-            });
+            return Json(serde_json::Value::default());
         }
     };
 
@@ -106,18 +97,7 @@ async fn aggregate_sigs(input: String) -> Json<BlsAggregationServiceResponse> {
         Some(s) => s,
         None => {
             println!("Failed to get inner JSON string");
-            return Json(BlsAggregationServiceResponse {
-                task_index: 0,
-                task_response_digest: TaskResponseDigest::default(),
-                non_signers_pub_keys_g1: vec![],
-                quorum_apks_g1: vec![],
-                signers_apk_g2: BlsG2Point::new(G2Affine::default()),
-                signers_agg_sig_g1: Signature::new(G1Affine::default()),
-                non_signer_quorum_bitmap_indices: vec![],
-                quorum_apk_indices: vec![],
-                total_stake_indices: vec![],
-                non_signer_stake_indices: vec![]
-            });
+            return Json(serde_json::Value::default());
         }
     };
 
@@ -126,18 +106,7 @@ async fn aggregate_sigs(input: String) -> Json<BlsAggregationServiceResponse> {
         Ok(v) => v,
         Err(e) => {
             println!("Failed to parse inner JSON: {}", e);
-            return Json(BlsAggregationServiceResponse {
-                task_index: 0,
-                task_response_digest: TaskResponseDigest::default(),
-                non_signers_pub_keys_g1: vec![],
-                quorum_apks_g1: vec![],
-                signers_apk_g2: BlsG2Point::new(G2Affine::default()),
-                signers_agg_sig_g1: Signature::new(G1Affine::default()),
-                non_signer_quorum_bitmap_indices: vec![],
-                quorum_apk_indices: vec![],
-                total_stake_indices: vec![],
-                non_signer_stake_indices: vec![]
-            });
+            return Json(serde_json::Value::default());
         }
     };
     
@@ -281,74 +250,43 @@ async fn aggregate_sigs(input: String) -> Json<BlsAggregationServiceResponse> {
             ).await {
                 Ok(Some(Ok(response))) => {
                     println!("BLS aggregation response: {:?}", response);
-                    cancellation_token.cancel();  // Clean shutdown before returning
-                    Json(response)
+                    cancellation_token.cancel();
+                    // Convert to stringified format
+                    let stringified = serde_json::json!({
+                        "task_index": response.task_index,
+                        "task_response_digest": response.task_response_digest,
+                        "sig_g1_x": response.signers_agg_sig_g1.g1_point().g1().x().unwrap().into_bigint().to_string(),
+                        "sig_g1_y": response.signers_agg_sig_g1.g1_point().g1().y().unwrap().into_bigint().to_string(),
+                        "apk_g1_x": response.quorum_apks_g1[0].g1().x().unwrap().into_bigint().to_string(),
+                        "apk_g1_y": response.quorum_apks_g1[0].g1().y().unwrap().into_bigint().to_string(),
+                        "apk_g2_x1": response.signers_apk_g2.g2().x().unwrap().c0.into_bigint().to_string(),
+                        "apk_g2_x2": response.signers_apk_g2.g2().x().unwrap().c1.into_bigint().to_string(),
+                        "apk_g2_y1": response.signers_apk_g2.g2().y().unwrap().c0.into_bigint().to_string(),
+                        "apk_g2_y2": response.signers_apk_g2.g2().y().unwrap().c1.into_bigint().to_string(),
+                    });
+                    Json(stringified)
                 }
                 Ok(Some(Err(e))) => {
                     println!("Error in aggregation response: {:?}", e);
                     cancellation_token.cancel();
-                    Json(BlsAggregationServiceResponse {
-                        task_index: 0,
-                        task_response_digest: TaskResponseDigest::default(),
-                        non_signers_pub_keys_g1: vec![],
-                        quorum_apks_g1: vec![],
-                        signers_apk_g2: BlsG2Point::new(G2Affine::default()),
-                        signers_agg_sig_g1: Signature::new(G1Affine::default()),
-                        non_signer_quorum_bitmap_indices: vec![],
-                        quorum_apk_indices: vec![],
-                        total_stake_indices: vec![],
-                        non_signer_stake_indices: vec![]
-                    })
+                    Json(serde_json::Value::default())
                 }
                 Ok(None) => {
                     println!("Aggregation channel closed without response");
                     cancellation_token.cancel();
-                    Json(BlsAggregationServiceResponse {
-                        task_index: 0,
-                        task_response_digest: TaskResponseDigest::default(),
-                        non_signers_pub_keys_g1: vec![],
-                        quorum_apks_g1: vec![],
-                        signers_apk_g2: BlsG2Point::new(G2Affine::default()),
-                        signers_agg_sig_g1: Signature::new(G1Affine::default()),
-                        non_signer_quorum_bitmap_indices: vec![],
-                        quorum_apk_indices: vec![],
-                        total_stake_indices: vec![],
-                        non_signer_stake_indices: vec![]
-                    })
+                    Json(serde_json::Value::default())
                 }
                 Err(_) => {
                     println!("Timeout waiting for aggregation response");
                     cancellation_token.cancel();
-                    Json(BlsAggregationServiceResponse {
-                        task_index: 0,
-                        task_response_digest: TaskResponseDigest::default(),
-                        non_signers_pub_keys_g1: vec![],
-                        quorum_apks_g1: vec![],
-                        signers_apk_g2: BlsG2Point::new(G2Affine::default()),
-                        signers_agg_sig_g1: Signature::new(G1Affine::default()),
-                        non_signer_quorum_bitmap_indices: vec![],
-                        quorum_apk_indices: vec![],
-                        total_stake_indices: vec![],
-                        non_signer_stake_indices: vec![]
-                    })
+                    Json(serde_json::Value::default())
                 }
             }
         }
         Err(e) => {
             println!("Failed to process signature: {:?}", e);
             cancellation_token.cancel();
-            Json(BlsAggregationServiceResponse {
-                task_index: 0,
-                task_response_digest: TaskResponseDigest::default(),
-                non_signers_pub_keys_g1: vec![],
-                quorum_apks_g1: vec![],
-                signers_apk_g2: BlsG2Point::new(G2Affine::default()),
-                signers_agg_sig_g1: Signature::new(G1Affine::default()),
-                non_signer_quorum_bitmap_indices: vec![],
-                quorum_apk_indices: vec![],
-                total_stake_indices: vec![],
-                non_signer_stake_indices: vec![]
-            })
+            Json(serde_json::Value::default())
         }
     }
 }

@@ -76,21 +76,14 @@ while true; do
             # Parse the BlsAggregationServiceResponse
             task_index=$(echo $aggregator_response | jq -r '.task_index')
             task_response_digest=$(echo $aggregator_response | jq -r '.task_response_digest')
-            signers_agg_sig=$(echo $aggregator_response | jq -r '.signers_agg_sig_g1.g1_point')
-            signers_apk_g2=$(echo $aggregator_response | jq -r '.signers_apk_g2')
-            quorum_apks_g1=$(echo $aggregator_response | jq -r '.quorum_apks_g1[0]')
-
-            # Extract coordinates from the arrays
-            SIG_G1_X=$(echo $signers_agg_sig | jq -r '.[0:32] | reduce .[] as $num (0; . * 256 + $num)' | printf "%.0f\n")
-            SIG_G1_Y=$(echo $signers_agg_sig | jq -r '.[32:64] | reduce .[] as $num (0; . * 256 + $num)' | printf "%.0f\n")
-            
-            APK_G1_X=$(echo $quorum_apks_g1 | jq -r '.[0:32] | reduce .[] as $num (0; . * 256 + $num)' | printf "%.0f\n")
-            APK_G1_Y=$(echo $quorum_apks_g1 | jq -r '.[32:64] | reduce .[] as $num (0; . * 256 + $num)' | printf "%.0f\n")
-            
-            APK_G2_X1=$(echo $signers_apk_g2 | jq -r '.[0:32] | reduce .[] as $num (0; . * 256 + $num)' | printf "%.0f\n")
-            APK_G2_X2=$(echo $signers_apk_g2 | jq -r '.[32:64] | reduce .[] as $num (0; . * 256 + $num)' | printf "%.0f\n")
-            APK_G2_Y1=$(echo $signers_apk_g2 | jq -r '.[64:96] | reduce .[] as $num (0; . * 256 + $num)' | printf "%.0f\n")
-            APK_G2_Y2=$(echo $signers_apk_g2 | jq -r '.[96:128] | reduce .[] as $num (0; . * 256 + $num)' | printf "%.0f\n")
+            SIG_G1_X=$(echo $aggregator_response | jq -r '.sig_g1_x')
+            SIG_G1_Y=$(echo $aggregator_response | jq -r '.sig_g1_y')
+            APK_G1_X=$(echo $aggregator_response | jq -r '.apk_g1_x')
+            APK_G1_Y=$(echo $aggregator_response | jq -r '.apk_g1_y')
+            APK_G2_X1=$(echo $aggregator_response | jq -r '.apk_g2_x1')
+            APK_G2_X2=$(echo $aggregator_response | jq -r '.apk_g2_x2')
+            APK_G2_Y1=$(echo $aggregator_response | jq -r '.apk_g2_y1')
+            APK_G2_Y2=$(echo $aggregator_response | jq -r '.apk_g2_y2')
 
             MSG_HASH=$task_response_digest
 
