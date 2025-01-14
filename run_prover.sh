@@ -8,7 +8,7 @@ value=10:00:00UTC
 threshold=1 
 signature=$(~/.foundry/bin/cast wallet sign --private-key $PRIVATE_KEY $platform$resource$value$threshold)
 echo "starting aggregator"
-./target/release/aggregator &
+/usr/bin/aggregator &
 echo "starting prover"
 while true; do
     node_selector_response=$(curl -X POST -H "Content-Type: application/json" -d '{
@@ -29,7 +29,7 @@ while true; do
         
         node_url=${node_url#http://}
         echo "Running prover with node_url: $node_url"
-        ./target/release/prover $node_url 7047
+        /usr/bin/prover $node_url 7047
         
         if [ $? -eq 0 ]; then
             counter=$((counter + 1))

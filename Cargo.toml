@@ -47,8 +47,8 @@ tlsn-prover = { git = "https://github.com/OpacityLabs/tlsn", package = "tlsn-pro
 notary-client = { git = "https://github.com/OpacityLabs/tlsn", package = "notary-client" }
 tls-core = { git = "https://github.com/OpacityLabs/tlsn", package = "tlsn-tls-core" }
 ark-bn254 = { version = "0.5.0" }
-ark-ec = { version = "0.4.2" }
-ark-ff = { version = "0.4.2" }
+ark-ec = { version = "0.5.0" }
+ark-ff = { version = "0.5.0" }
 num = { version = "0.4.3" }
 
 tokio-util = "0.7"
@@ -64,17 +64,19 @@ rand = "0.8.5"
 eyre = "0.6.8"
 dotenv = "0.15.0"
 
-eigen-services-blsaggregation = "0.1.1"
-eigen-client-avsregistry = "0.1.1"
+eigen-services-blsaggregation = "0.1.2"
+eigen-client-avsregistry = "0.1.2"
 eigen-logging = "0.1.1"
-eigen-services-avsregistry = "0.1.1"
-eigen-services-operatorsinfo = "0.1.1"
-eigen-crypto-bls = "0.1.1"
-eigen-crypto-bn254 = "0.1.1"
+eigen-services-avsregistry = "0.1.2"
+eigen-services-operatorsinfo = "0.1.2"
+eigen-crypto-bls = "0.1.2"
+eigen-crypto-bn254 = "0.1.2"
+alloy = "0.8.0"
 alloy-primitives = "0.8.15"
-alloy-provider = "=0.5.4"
-eigen-types = "0.1.1"
-eigen-utils = "0.1.1"
+alloy-provider = "0.5.4"
+alloy-network = "0.5.4"
+eigen-types = "0.1.2"
+eigen-utils = "0.1.2"
 axum = { version = "0.7", features = ["ws"] }
 
 

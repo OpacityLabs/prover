@@ -6,8 +6,8 @@ RUN ~/.foundry/bin/foundryup
 WORKDIR /opacity-simple-prover
 COPY . .
 RUN cargo build --release
-COPY /target/release/prover /usr/bin/prover
-COPY /target/release/aggregator /usr/bin/aggregator
+RUN mv target/release/prover /usr/bin/prover
+RUN mv target/release/aggregator /usr/bin/aggregator
 COPY run_prover.sh /opacity-simple-prover/run_prover.sh
 RUN chmod +x /opacity-simple-prover/run_prover.sh
 ENTRYPOINT ["/opacity-simple-prover/run_prover.sh"]

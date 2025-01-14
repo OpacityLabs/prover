@@ -1,49 +1,34 @@
 // once threshold is reached, send the aggregated signature to something onchain (eas maybe?)
 use ark_bn254::g1::G1Affine;
-use ark_bn254::Fr;
-extern crate num;
 use num::bigint::BigUint;
-use eigen_services_blsaggregation::bls_agg::{BlsAggregationServiceResponse, BlsAggregatorService};
-use eigen_client_avsregistry::reader::{AvsRegistryChainReader, AvsRegistryReader};
+use eigen_services_blsaggregation::bls_aggregation_service_response::BlsAggregationServiceResponse;
+use eigen_services_blsaggregation::bls_agg::BlsAggregatorService;
+use eigen_client_avsregistry::reader::AvsRegistryChainReader;
 use eigen_logging::{get_logger, init_logger};
-use eigen_services_avsregistry::{chaincaller::AvsRegistryServiceChainCaller, AvsRegistryService};
-use eigen_services_operatorsinfo::{operatorsinfo_inmemory::OperatorInfoServiceInMemory, operator_info::OperatorInfoService};
-use eigen_crypto_bls::{Signature, BlsG1Point, BlsG2Point};
+use eigen_logging::logger::Logger;
+use eigen_logging::noop_logger::NoopLogger;
+use eigen_services_avsregistry::chaincaller::AvsRegistryServiceChainCaller;
+use eigen_services_operatorsinfo::operatorsinfo_inmemory::OperatorInfoServiceInMemory;
+use eigen_crypto_bls::{Signature, BlsG2Point};
 use eigen_types::{
-    avs::{TaskIndex, TaskResponseDigest, SignedTaskResponseDigest},
-    operator::{QuorumNum, QuorumThresholdPercentages},
+    avs::TaskResponseDigest,
+    operator::QuorumThresholdPercentages,
 };
-use eigen_utils::{
-    get_provider, get_signer,
-    {
-        iblssignaturechecker::{
-            IBLSSignatureChecker::{self, NonSignerStakesAndSignature},
-            BN254::G1Point,
-        },
-        registrycoordinator::{
-            IRegistryCoordinator::OperatorSetParam, IStakeRegistry::StrategyParams,
-            RegistryCoordinator,
-        },
-        operatorstateretriever::OperatorStateRetriever
-    },
-};
-use eigen_crypto_bn254::utils::verify_message;
-use alloy_primitives::{hex, Bytes, FixedBytes, address, Address};
-use alloy_provider::Provider;
+use alloy_primitives::{Address, Bytes, FixedBytes, address};
+use alloy_provider::{Provider, RootProvider};
+use alloy_network::Ethereum;
+use url::Url;
 use std::time::Duration;
 use std::str::FromStr;
 use ark_bn254::g2::G2Affine;
-use ark_ec::AffineRepr;
-use ark_bn254::Fq2;
+use std::sync::Arc;
 
 use axum::{
-    extract::State,
     routing::post,
     Json,
     Router,
 };
-use eyre::Result;
-use tracing::{info, debug};
+use tracing::info;
 use tokio_util::sync::CancellationToken;
 use tokio::{task, time::sleep};
 
@@ -203,7 +188,7 @@ async fn aggregate_sigs(input: String) -> Json<BlsAggregationServiceResponse> {
     let http_endpoint = String::from("http://ethereum:8545"); // TODO: get from .env
     let ws_endpoint = String::from("ws://ethereum:8545"); // TODO: get from .env
 
-    let provider = get_provider(http_endpoint.as_str());
+    let provider: RootProvider<_, Ethereum> = RootProvider::new_http(Url::parse(&http_endpoint).unwrap());
     let current_block_num = provider.get_block_number().await.unwrap();
     let quorum_nums = Bytes::from([0u8]);
     let quorum_threshold_percentages: QuorumThresholdPercentages = vec![33];
@@ -243,7 +228,11 @@ async fn aggregate_sigs(input: String) -> Json<BlsAggregationServiceResponse> {
         operators_info.clone()
     );
 
-    let bls_agg_service = BlsAggregatorService::new(avs_registry_service.clone());
+    let logger: Arc<dyn Logger> = Arc::new(NoopLogger {});
+    let bls_agg_service = BlsAggregatorService::new(
+        avs_registry_service.clone(),
+        logger
+    );
 
     // Initialize the task
     println!("Initializing task...");
