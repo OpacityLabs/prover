@@ -81,16 +81,16 @@ while true; do
             quorum_apks_g1=$(echo $aggregator_response | jq -r '.quorum_apks_g1[0]')
 
             # Extract coordinates from the arrays
-            SIG_G1_X=$(echo $signers_agg_sig | jq -r '.[0:32] | reduce .[] as $num (0; . * 256 + $num)')
-            SIG_G1_Y=$(echo $signers_agg_sig | jq -r '.[32:64] | reduce .[] as $num (0; . * 256 + $num)')
+            SIG_G1_X=$(echo $signers_agg_sig | jq -r '.[0:32] | reduce .[] as $num (0; . * 256 + $num)' | printf "%.0f\n")
+            SIG_G1_Y=$(echo $signers_agg_sig | jq -r '.[32:64] | reduce .[] as $num (0; . * 256 + $num)' | printf "%.0f\n")
             
-            APK_G1_X=$(echo $quorum_apks_g1 | jq -r '.[0:32] | reduce .[] as $num (0; . * 256 + $num)')
-            APK_G1_Y=$(echo $quorum_apks_g1 | jq -r '.[32:64] | reduce .[] as $num (0; . * 256 + $num)')
+            APK_G1_X=$(echo $quorum_apks_g1 | jq -r '.[0:32] | reduce .[] as $num (0; . * 256 + $num)' | printf "%.0f\n")
+            APK_G1_Y=$(echo $quorum_apks_g1 | jq -r '.[32:64] | reduce .[] as $num (0; . * 256 + $num)' | printf "%.0f\n")
             
-            APK_G2_X1=$(echo $signers_apk_g2 | jq -r '.[0:32] | reduce .[] as $num (0; . * 256 + $num)')
-            APK_G2_X2=$(echo $signers_apk_g2 | jq -r '.[32:64] | reduce .[] as $num (0; . * 256 + $num)')
-            APK_G2_Y1=$(echo $signers_apk_g2 | jq -r '.[64:96] | reduce .[] as $num (0; . * 256 + $num)')
-            APK_G2_Y2=$(echo $signers_apk_g2 | jq -r '.[96:128] | reduce .[] as $num (0; . * 256 + $num)')
+            APK_G2_X1=$(echo $signers_apk_g2 | jq -r '.[0:32] | reduce .[] as $num (0; . * 256 + $num)' | printf "%.0f\n")
+            APK_G2_X2=$(echo $signers_apk_g2 | jq -r '.[32:64] | reduce .[] as $num (0; . * 256 + $num)' | printf "%.0f\n")
+            APK_G2_Y1=$(echo $signers_apk_g2 | jq -r '.[64:96] | reduce .[] as $num (0; . * 256 + $num)' | printf "%.0f\n")
+            APK_G2_Y2=$(echo $signers_apk_g2 | jq -r '.[96:128] | reduce .[] as $num (0; . * 256 + $num)' | printf "%.0f\n")
 
             MSG_HASH=$task_response_digest
 
@@ -101,7 +101,7 @@ while true; do
             echo "SIG_G1: ($SIG_G1_X,$SIG_G1_Y)"
 
             # Execute cast call
-            sig_verification=$(~/.foundry/bin/cast call 0xb7ba8bbc36AA5684fC44D02aD666dF8E23BEEbF8 --rpc-url http://ethereum:8545 \
+            sig_verification=$(~/.foundry/bin/cast call $BLS_SIGNATURE_CHECKER_ADDRESS --rpc-url http://ethereum:8545 \
                 "trySignatureAndApkVerification(bytes32,(uint256,uint256),(uint256[2],uint256[2]),(uint256,uint256))(bool,bool)" \
                 $MSG_HASH \
                 "($APK_G1_X,$APK_G1_Y)" \
