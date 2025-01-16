@@ -259,10 +259,24 @@ async fn aggregate_sigs(input: String) -> Json<serde_json::Value> {
                         "sig_g1_y": response.signers_agg_sig_g1.g1_point().g1().y().unwrap().into_bigint().to_string(),
                         "apk_g1_x": response.quorum_apks_g1[0].g1().x().unwrap().into_bigint().to_string(),
                         "apk_g1_y": response.quorum_apks_g1[0].g1().y().unwrap().into_bigint().to_string(),
-                        "apk_g2_x1": response.signers_apk_g2.g2().x().unwrap().c0.into_bigint().to_string(),
-                        "apk_g2_x2": response.signers_apk_g2.g2().x().unwrap().c1.into_bigint().to_string(),
-                        "apk_g2_y1": response.signers_apk_g2.g2().y().unwrap().c0.into_bigint().to_string(),
-                        "apk_g2_y2": response.signers_apk_g2.g2().y().unwrap().c1.into_bigint().to_string(),
+                        "apk_g2_x2": response.signers_apk_g2.g2().x().unwrap().c0.into_bigint().to_string(),
+                        "apk_g2_x1": response.signers_apk_g2.g2().x().unwrap().c1.into_bigint().to_string(),
+                        "apk_g2_y2": response.signers_apk_g2.g2().y().unwrap().c0.into_bigint().to_string(),
+                        "apk_g2_y1": response.signers_apk_g2.g2().y().unwrap().c1.into_bigint().to_string(),
+                        "non_signer_bitmap_indices": response.non_signer_quorum_bitmap_indices,
+                        "non_signer_public_keys": [
+                            {
+                                "x": response.non_signers_pub_keys_g1[0].g1().x().unwrap().into_bigint().to_string(),
+                                "y": response.non_signers_pub_keys_g1[0].g1().y().unwrap().into_bigint().to_string()
+                            },
+                            {
+                                "x": response.non_signers_pub_keys_g1[1].g1().x().unwrap().into_bigint().to_string(),
+                                "y": response.non_signers_pub_keys_g1[1].g1().y().unwrap().into_bigint().to_string()
+                            }
+                        ],
+                        "quorum_apk_indices": response.quorum_apk_indices,
+                        "total_stake_indices": response.total_stake_indices,
+                        "non_signer_stake_indices": response.non_signer_stake_indices
                     });
                     Json(stringified)
                 }

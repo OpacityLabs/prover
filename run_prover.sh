@@ -73,9 +73,17 @@ while true; do
             aggregator_response=$(curl -X POST -d "$response" http://127.0.0.1:5074/aggregate)
             echo "Aggregator Response: $aggregator_response"
 
-            # Parse the BlsAggregationServiceResponse
-            task_index=$(echo $aggregator_response | jq -r '.task_index')
-            task_response_digest=$(echo $aggregator_response | jq -r '.task_response_digest')
+            # Extract values from aggregator response
+            NON_SIGNER_BITMAP_INDICES_0=$(echo $aggregator_response | jq -r '.non_signer_bitmap_indices[0]')
+            NON_SIGNER_BITMAP_INDICES_1=$(echo $aggregator_response | jq -r '.non_signer_bitmap_indices[1]')
+            NON_SIGNER_PUBLIC_KEYS_0_X=$(echo $aggregator_response | jq -r '.non_signer_public_keys[0].x')
+            NON_SIGNER_PUBLIC_KEYS_0_Y=$(echo $aggregator_response | jq -r '.non_signer_public_keys[0].y')
+            NON_SIGNER_PUBLIC_KEYS_1_X=$(echo $aggregator_response | jq -r '.non_signer_public_keys[1].x')
+            NON_SIGNER_PUBLIC_KEYS_1_Y=$(echo $aggregator_response | jq -r '.non_signer_public_keys[1].y')
+            QUORUM_APK_INDICES=$(echo $aggregator_response | jq -r '.quorum_apk_indices[0]')
+            TOTAL_STAKE_INDICES=$(echo $aggregator_response | jq -r '.total_stake_indices[0]')
+            NON_SIGNER_STAKE_INDICES_0=$(echo $aggregator_response | jq -r '.non_signer_stake_indices[0][0]')
+            NON_SIGNER_STAKE_INDICES_1=$(echo $aggregator_response | jq -r '.non_signer_stake_indices[0][1]')
             SIG_G1_X=$(echo $aggregator_response | jq -r '.sig_g1_x')
             SIG_G1_Y=$(echo $aggregator_response | jq -r '.sig_g1_y')
             APK_G1_X=$(echo $aggregator_response | jq -r '.apk_g1_x')
@@ -84,22 +92,34 @@ while true; do
             APK_G2_X2=$(echo $aggregator_response | jq -r '.apk_g2_x2')
             APK_G2_Y1=$(echo $aggregator_response | jq -r '.apk_g2_y1')
             APK_G2_Y2=$(echo $aggregator_response | jq -r '.apk_g2_y2')
+            MSG_HASH=$(echo $aggregator_response | jq -r '.task_response_digest')
+            QUORUM_NUMBERS="0x00"
 
-            MSG_HASH=$task_response_digest
+            # Get current block and set reference block
+            CURRENT_BLOCK=$(~/.foundry/bin/cast block latest --rpc-url http://ethereum:8545 | grep "number" | awk '{print $2}')
+            REF_BLOCK_NUMBER=$((CURRENT_BLOCK-1))
 
-            echo "Extracted values for cast call:"
-            echo "MSG_HASH: $MSG_HASH"
-            echo "APK_G1: ($APK_G1_X,$APK_G1_Y)"
-            echo "APK_G2: ([$APK_G2_X2,$APK_G2_X1],[$APK_G2_Y2,$APK_G2_Y1])"
-            echo "SIG_G1: ($SIG_G1_X,$SIG_G1_Y)"
-
-            # Execute cast call
-            sig_verification=$(~/.foundry/bin/cast call $BLS_SIGNATURE_CHECKER_ADDRESS --rpc-url http://ethereum:8545 \
-                "trySignatureAndApkVerification(bytes32,(uint256,uint256),(uint256[2],uint256[2]),(uint256,uint256))(bool,bool)" \
-                $MSG_HASH \
-                "($APK_G1_X,$APK_G1_Y)" \
-                "([$APK_G2_X2,$APK_G2_X1],[$APK_G2_Y2,$APK_G2_Y1])" \
-                "($SIG_G1_X,$SIG_G1_Y)")
+            # Execute checkSignatures call
+            echo "verifying signature onchain..."
+            echo "*************************************************"
+            echo "if this fails, with \"revert: BLSSignatureChecker.checkSignatures: StakeRegistry updates must be within withdrawalDelayBlocks\", run the following in the terminal for this container: "
+            echo "cast send 0xeCd099fA5048c3738a5544347D8cBc8076E76494 --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \"updateOperatorsForQuorum(address[][],bytes)\" [[\$OPERATOR_ADDRESS_1,\$OPERATOR_ADDRESS_2,\$OPERATOR_ADDRESS_3]] 0x00 --rpc-url http://ethereum:8545"
+            echo "(get the operator addresses from the testacc files, they must be ordered lowest to highest)"
+            echo "*************************************************"
+            sig_verification=$(~/.foundry/bin/cast call $BLS_SIGNATURE_CHECKER_ADDRESS \
+            "checkSignatures(bytes32,bytes,uint32,(uint32[],(uint256,uint256)[],(uint256,uint256)[],(uint256[2],uint256[2]),(uint256,uint256),uint32[],uint32[],uint32[][]))" \
+            $MSG_HASH \
+            $QUORUM_NUMBERS \
+            $REF_BLOCK_NUMBER \
+            "([$NON_SIGNER_BITMAP_INDICES_0,$NON_SIGNER_BITMAP_INDICES_1],\
+            [($NON_SIGNER_PUBLIC_KEYS_0_X,$NON_SIGNER_PUBLIC_KEYS_0_Y),($NON_SIGNER_PUBLIC_KEYS_1_X,$NON_SIGNER_PUBLIC_KEYS_1_Y)],\
+            [($APK_G1_X,$APK_G1_Y)],\
+            ([$APK_G2_X1,$APK_G2_X2],[$APK_G2_Y1,$APK_G2_Y2]),\
+            ($SIG_G1_X,$SIG_G1_Y),\
+            [$QUORUM_APK_INDICES],\
+            [$TOTAL_STAKE_INDICES],\
+            [[$NON_SIGNER_STAKE_INDICES_0,$NON_SIGNER_STAKE_INDICES_1]])" \
+            --rpc-url http://ethereum:8545)
             echo "Signature Verification: $sig_verification"
 
         else 
