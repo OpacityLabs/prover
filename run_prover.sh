@@ -2,31 +2,46 @@
 
 counter=0
 address=$(~/.foundry/bin/cast wallet address $PRIVATE_KEY)
-platform=kalshi
+platform=kalshi # TODO: these are not right, which means they are not being checked in the verify step - fix this.
 resource=open_time
 value=10:00:00UTC
-threshold=1 
-signature=$(~/.foundry/bin/cast wallet sign --private-key $PRIVATE_KEY $platform$resource$value$threshold)
 echo "starting aggregator"
 /usr/bin/aggregator &
 echo "starting prover"
 while true; do
-    node_selector_response=$(curl -X POST -H "Content-Type: application/json" -d '{
-        "address": "'"$address"'",
-        "platform": "'"$platform"'",
-        "resource": "'"$resource"'",
-        "value": "'"$value"'",
-        "threshold": '"$threshold"',
-        "signature": "'"$signature"'"
-    }' "$NODE_SELECTOR")
-    node_url=$(echo $node_selector_response | jq -r '.node_url')
-    task_index=$(echo $node_selector_response | jq -r '.task_index')
-    echo "Task index: $task_index"
-        
-    if [ -z "$node_url" ] || [ "$node_url" == "null" ]; then
-        echo "Failed to get a valid node_url. Retrying in 5 seconds..."
-    else
-        
+    # Add random operator count selection
+    operator_count=$((RANDOM % 3 + 1))
+    echo "operator_count for this notorization: $operator_count"
+    threshold=$((33 * operator_count))
+    signature=$(~/.foundry/bin/cast wallet sign --private-key $PRIVATE_KEY $platform$resource$value$threshold)
+    
+    # Initialize counter for successful proofs in this batch
+    successful_proofs=0
+    
+    # Outer loop runs until we get enough successful proofs
+    while [ $successful_proofs -lt $operator_count ]; do
+    echo "########################################################"
+    echo "starting new session"
+    echo "########################################################"
+        node_selector_response=$(curl -X POST -H "Content-Type: application/json" -d '{
+            "address": "'"$address"'",
+            "platform": "'"$platform"'",
+            "resource": "'"$resource"'",
+            "value": "'"$value"'",
+            "threshold": '"$threshold"',
+            "signature": "'"$signature"'",
+            "operator_count": '"$operator_count"'
+        }' "$NODE_SELECTOR")
+        node_url=$(echo $node_selector_response | jq -r '.node_url')
+        task_index=$(echo $node_selector_response | jq -r '.task_index')
+        echo "Task index: $task_index"
+# TODO: this is not checking if the node_url is valid - it just keeps spamming the nodeselector, and nodeselector gives it a new task everytime.
+        if [ -z "$node_url" ] || [ "$node_url" == "null" ]; then
+            echo "Failed to get a valid node_url. Retrying in 5 seconds..."
+            sleep 5
+            continue
+        fi
+            
         node_url=${node_url#http://}
         echo "Running prover with node_url: $node_url"
         /usr/bin/prover $node_url 7047
@@ -68,63 +83,67 @@ while true; do
             echo "Submitting combined proof for verification..."
             response=$(curl -X POST -H "Content-Type: application/json" -d @combined_proof_$counter.json "$node_url:6074/verify")
             echo "Verify Response: $response"
-
+# TODO: this is not actaully aggregating the signatures - the aggregator just returns the response of a single signature every time
             # Send to aggregator and capture its response
             aggregator_response=$(curl -X POST -d "$response" http://127.0.0.1:5074/aggregate)
+            successful_proofs=$((successful_proofs + 1))
+            echo "Successful proof $successful_proofs of $operator_count"
+
+            
+            # Process successful aggregation response
             echo "Aggregator Response: $aggregator_response"
-
-            # Extract values from aggregator response
-            NON_SIGNER_BITMAP_INDICES_0=$(echo $aggregator_response | jq -r '.non_signer_bitmap_indices[0]')
-            NON_SIGNER_BITMAP_INDICES_1=$(echo $aggregator_response | jq -r '.non_signer_bitmap_indices[1]')
-            NON_SIGNER_PUBLIC_KEYS_0_X=$(echo $aggregator_response | jq -r '.non_signer_public_keys[0].x')
-            NON_SIGNER_PUBLIC_KEYS_0_Y=$(echo $aggregator_response | jq -r '.non_signer_public_keys[0].y')
-            NON_SIGNER_PUBLIC_KEYS_1_X=$(echo $aggregator_response | jq -r '.non_signer_public_keys[1].x')
-            NON_SIGNER_PUBLIC_KEYS_1_Y=$(echo $aggregator_response | jq -r '.non_signer_public_keys[1].y')
-            QUORUM_APK_INDICES=$(echo $aggregator_response | jq -r '.quorum_apk_indices[0]')
-            TOTAL_STAKE_INDICES=$(echo $aggregator_response | jq -r '.total_stake_indices[0]')
-            NON_SIGNER_STAKE_INDICES_0=$(echo $aggregator_response | jq -r '.non_signer_stake_indices[0][0]')
-            NON_SIGNER_STAKE_INDICES_1=$(echo $aggregator_response | jq -r '.non_signer_stake_indices[0][1]')
-            SIG_G1_X=$(echo $aggregator_response | jq -r '.sig_g1_x')
-            SIG_G1_Y=$(echo $aggregator_response | jq -r '.sig_g1_y')
-            APK_G1_X=$(echo $aggregator_response | jq -r '.apk_g1_x')
-            APK_G1_Y=$(echo $aggregator_response | jq -r '.apk_g1_y')
-            APK_G2_X1=$(echo $aggregator_response | jq -r '.apk_g2_x1')
-            APK_G2_X2=$(echo $aggregator_response | jq -r '.apk_g2_x2')
-            APK_G2_Y1=$(echo $aggregator_response | jq -r '.apk_g2_y1')
-            APK_G2_Y2=$(echo $aggregator_response | jq -r '.apk_g2_y2')
-            MSG_HASH=$(echo $aggregator_response | jq -r '.task_response_digest')
-            QUORUM_NUMBERS="0x00"
-
-            # Get current block and set reference block
-            CURRENT_BLOCK=$(~/.foundry/bin/cast block latest --rpc-url http://ethereum:8545 | grep "number" | awk '{print $2}')
-            REF_BLOCK_NUMBER=$((CURRENT_BLOCK-1))
-
-            # Execute checkSignatures call
-            echo "verifying signature onchain..."
-            echo "*************************************************"
-            echo "if this fails, with \"revert: BLSSignatureChecker.checkSignatures: StakeRegistry updates must be within withdrawalDelayBlocks\", run the following in the terminal for this container: "
-            echo "cast send 0xeCd099fA5048c3738a5544347D8cBc8076E76494 --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \"updateOperatorsForQuorum(address[][],bytes)\" [[\$OPERATOR_ADDRESS_1,\$OPERATOR_ADDRESS_2,\$OPERATOR_ADDRESS_3]] 0x00 --rpc-url http://ethereum:8545"
-            echo "(get the operator addresses from the testacc files, they must be ordered lowest to highest)"
-            echo "*************************************************"
-            sig_verification=$(~/.foundry/bin/cast call $BLS_SIGNATURE_CHECKER_ADDRESS \
-            "checkSignatures(bytes32,bytes,uint32,(uint32[],(uint256,uint256)[],(uint256,uint256)[],(uint256[2],uint256[2]),(uint256,uint256),uint32[],uint32[],uint32[][]))" \
-            $MSG_HASH \
-            $QUORUM_NUMBERS \
-            $REF_BLOCK_NUMBER \
-            "([$NON_SIGNER_BITMAP_INDICES_0,$NON_SIGNER_BITMAP_INDICES_1],\
-            [($NON_SIGNER_PUBLIC_KEYS_0_X,$NON_SIGNER_PUBLIC_KEYS_0_Y),($NON_SIGNER_PUBLIC_KEYS_1_X,$NON_SIGNER_PUBLIC_KEYS_1_Y)],\
-            [($APK_G1_X,$APK_G1_Y)],\
-            ([$APK_G2_X1,$APK_G2_X2],[$APK_G2_Y1,$APK_G2_Y2]),\
-            ($SIG_G1_X,$SIG_G1_Y),\
-            [$QUORUM_APK_INDICES],\
-            [$TOTAL_STAKE_INDICES],\
-            [[$NON_SIGNER_STAKE_INDICES_0,$NON_SIGNER_STAKE_INDICES_1]])" \
-            --rpc-url http://ethereum:8545)
-            echo "Signature Verification: $sig_verification"
-
+        
         else 
             echo "Request failed"
         fi
-    fi
+    done
+    # Extract values from aggregator response
+    NON_SIGNER_BITMAP_INDICES_0=$(echo $aggregator_response | jq -r '.non_signer_bitmap_indices[0]')
+    NON_SIGNER_BITMAP_INDICES_1=$(echo $aggregator_response | jq -r '.non_signer_bitmap_indices[1]')
+    NON_SIGNER_PUBLIC_KEYS_0_X=$(echo $aggregator_response | jq -r '.non_signer_public_keys[0].x')
+    NON_SIGNER_PUBLIC_KEYS_0_Y=$(echo $aggregator_response | jq -r '.non_signer_public_keys[0].y')
+    NON_SIGNER_PUBLIC_KEYS_1_X=$(echo $aggregator_response | jq -r '.non_signer_public_keys[1].x')
+    NON_SIGNER_PUBLIC_KEYS_1_Y=$(echo $aggregator_response | jq -r '.non_signer_public_keys[1].y')
+    QUORUM_APK_INDICES=$(echo $aggregator_response | jq -r '.quorum_apk_indices[0]')
+    TOTAL_STAKE_INDICES=$(echo $aggregator_response | jq -r '.total_stake_indices[0]')
+    NON_SIGNER_STAKE_INDICES_0=$(echo $aggregator_response | jq -r '.non_signer_stake_indices[0][0]')
+    NON_SIGNER_STAKE_INDICES_1=$(echo $aggregator_response | jq -r '.non_signer_stake_indices[0][1]')
+    SIG_G1_X=$(echo $aggregator_response | jq -r '.sig_g1_x')
+    SIG_G1_Y=$(echo $aggregator_response | jq -r '.sig_g1_y')
+    APK_G1_X=$(echo $aggregator_response | jq -r '.apk_g1_x')
+    APK_G1_Y=$(echo $aggregator_response | jq -r '.apk_g1_y')
+    APK_G2_X1=$(echo $aggregator_response | jq -r '.apk_g2_x1')
+    APK_G2_X2=$(echo $aggregator_response | jq -r '.apk_g2_x2')
+    APK_G2_Y1=$(echo $aggregator_response | jq -r '.apk_g2_y1')
+    APK_G2_Y2=$(echo $aggregator_response | jq -r '.apk_g2_y2')
+    MSG_HASH=$(echo $aggregator_response | jq -r '.task_response_digest')
+    QUORUM_NUMBERS="0x00"
+
+    # Get current block and set reference block
+    CURRENT_BLOCK=$(~/.foundry/bin/cast block latest --rpc-url http://ethereum:8545 | grep "number" | awk '{print $2}')
+    REF_BLOCK_NUMBER=$((CURRENT_BLOCK-1))
+
+    # Execute checkSignatures call
+    echo "verifying signature onchain..."
+    echo "*************************************************"
+    echo "if this fails, with \"revert: BLSSignatureChecker.checkSignatures: StakeRegistry updates must be within withdrawalDelayBlocks\", run the following in the terminal for this container: "
+    echo "cast send 0xeCd099fA5048c3738a5544347D8cBc8076E76494 --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \"updateOperatorsForQuorum(address[][],bytes)\" [[\$OPERATOR_ADDRESS_1,\$OPERATOR_ADDRESS_2,\$OPERATOR_ADDRESS_3]] 0x00 --rpc-url http://ethereum:8545"
+    echo "(get the operator addresses from the testacc files, they must be ordered lowest to highest)"
+    echo "*************************************************"
+    sig_verification=$(~/.foundry/bin/cast call $BLS_SIGNATURE_CHECKER_ADDRESS \
+    "checkSignatures(bytes32,bytes,uint32,(uint32[],(uint256,uint256)[],(uint256,uint256)[],(uint256[2],uint256[2]),(uint256,uint256),uint32[],uint32[],uint32[][]))" \
+    $MSG_HASH \
+    $QUORUM_NUMBERS \
+    $REF_BLOCK_NUMBER \
+    "([$NON_SIGNER_BITMAP_INDICES_0,$NON_SIGNER_BITMAP_INDICES_1],\
+    [($NON_SIGNER_PUBLIC_KEYS_0_X,$NON_SIGNER_PUBLIC_KEYS_0_Y),($NON_SIGNER_PUBLIC_KEYS_1_X,$NON_SIGNER_PUBLIC_KEYS_1_Y)],\
+    [($APK_G1_X,$APK_G1_Y)],\
+    ([$APK_G2_X1,$APK_G2_X2],[$APK_G2_Y1,$APK_G2_Y2]),\
+    ($SIG_G1_X,$SIG_G1_Y),\
+    [$QUORUM_APK_INDICES],\
+    [$TOTAL_STAKE_INDICES],\
+    [[$NON_SIGNER_STAKE_INDICES_0,$NON_SIGNER_STAKE_INDICES_1]])" \
+    --rpc-url http://ethereum:8545)
+    echo "Signature Verification: $sig_verification"
     sleep 5
 done 
