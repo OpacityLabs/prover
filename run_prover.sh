@@ -5,9 +5,11 @@ rm -f /tmp/quorum_updated
 
 counter=0
 address=$(~/.foundry/bin/cast wallet address $PRIVATE_KEY)
-platform=kalshi # TODO: these are not right, which means they are not being checked in the verify step - fix this.
-resource=open_time
-value=10:00:00UTC
+platform=api.cloudflare.com
+resource=model
+value=gpt-4o-mini
+threshold=1 
+signature=$(~/.foundry/bin/cast wallet sign --private-key $PRIVATE_KEY $platform$resource$value$threshold)
 echo "starting aggregator"
 /usr/bin/aggregator &
 echo "starting prover"
@@ -122,12 +124,9 @@ while true; do
     MSG_HASH=$(echo $aggregator_response | jq -r '.task_response_digest')
     QUORUM_NUMBERS="0x00"
 
-    # Get current block and set reference block
-    CURRENT_BLOCK=$(~/.foundry/bin/cast block latest --rpc-url http://ethereum:8545 | grep "number" | awk '{print $2}')
-    REF_BLOCK_NUMBER=$((CURRENT_BLOCK-1))
-
-            # Execute checkSignatures call
-            echo "verifying signature onchain..."
+            # Get current block and set reference block
+            CURRENT_BLOCK=$(~/.foundry/bin/cast block latest --rpc-url http://ethereum:8545 | grep "number" | awk '{print $2}')
+            REF_BLOCK_NUMBER=$((CURRENT_BLOCK-1))
             
             # Check if we've already updated quorum (using a flag file in /tmp)
             if [ ! -f "/tmp/quorum_updated" ]; then
@@ -165,6 +164,9 @@ while true; do
             else
                 echo "Quorum already updated (flag file exists)"
             fi
+
+            # Execute checkSignatures call
+            echo "verifying signature onchain..."
 
             sig_verification=$(~/.foundry/bin/cast call $BLS_SIGNATURE_CHECKER_ADDRESS \
             "checkSignatures(bytes32,bytes,uint32,(uint32[],(uint256,uint256)[],(uint256,uint256)[],(uint256[2],uint256[2]),(uint256,uint256),uint32[],uint32[],uint32[][]))" \
