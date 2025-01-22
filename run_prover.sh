@@ -123,27 +123,65 @@ while true; do
     CURRENT_BLOCK=$(~/.foundry/bin/cast block latest --rpc-url http://ethereum:8545 | grep "number" | awk '{print $2}')
     REF_BLOCK_NUMBER=$((CURRENT_BLOCK-1))
 
-    # Execute checkSignatures call
-    echo "verifying signature onchain..."
-    echo "*************************************************"
-    echo "if this fails, with \"revert: BLSSignatureChecker.checkSignatures: StakeRegistry updates must be within withdrawalDelayBlocks\", run the following in the terminal for this container: "
-    echo "cast send 0xeCd099fA5048c3738a5544347D8cBc8076E76494 --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \"updateOperatorsForQuorum(address[][],bytes)\" [[\$OPERATOR_ADDRESS_1,\$OPERATOR_ADDRESS_2,\$OPERATOR_ADDRESS_3]] 0x00 --rpc-url http://ethereum:8545"
-    echo "(get the operator addresses from the testacc files, they must be ordered lowest to highest)"
-    echo "*************************************************"
-    sig_verification=$(~/.foundry/bin/cast call $BLS_SIGNATURE_CHECKER_ADDRESS \
-    "checkSignatures(bytes32,bytes,uint32,(uint32[],(uint256,uint256)[],(uint256,uint256)[],(uint256[2],uint256[2]),(uint256,uint256),uint32[],uint32[],uint32[][]))" \
-    $MSG_HASH \
-    $QUORUM_NUMBERS \
-    $REF_BLOCK_NUMBER \
-    "([$NON_SIGNER_BITMAP_INDICES_0,$NON_SIGNER_BITMAP_INDICES_1],\
-    [($NON_SIGNER_PUBLIC_KEYS_0_X,$NON_SIGNER_PUBLIC_KEYS_0_Y),($NON_SIGNER_PUBLIC_KEYS_1_X,$NON_SIGNER_PUBLIC_KEYS_1_Y)],\
-    [($APK_G1_X,$APK_G1_Y)],\
-    ([$APK_G2_X1,$APK_G2_X2],[$APK_G2_Y1,$APK_G2_Y2]),\
-    ($SIG_G1_X,$SIG_G1_Y),\
-    [$QUORUM_APK_INDICES],\
-    [$TOTAL_STAKE_INDICES],\
-    [[$NON_SIGNER_STAKE_INDICES_0,$NON_SIGNER_STAKE_INDICES_1]])" \
-    --rpc-url http://ethereum:8545)
-    echo "Signature Verification: $sig_verification"
+            # Execute checkSignatures call
+            echo "verifying signature onchain..."
+            
+            # Check if we've already updated quorum (using a flag file in /tmp)
+            if [ ! -f "/tmp/quorum_updated" ]; then
+                echo "Updating quorum..."
+                
+                # Debug: List all files in operator_keys directory
+                echo "Contents of /app/operator_keys:"
+                ls -la /app/operator_keys
+                
+                # Get all operator addresses from key files and sort them hexadecimally
+                operator_addresses=$(find "/app/operator_keys" -name "testacc*.ecdsa.key.json" -exec jq -r '"0x" + .address' {} \; | sort -k1.3)
+                
+                # Debug: Show found addresses
+                echo "Found operator addresses:"
+                echo "$operator_addresses"
+                
+                # Convert newline-separated addresses into comma-separated list for cast command
+                operator_address_list=$(echo "$operator_addresses" | tr '\n' ',' | sed 's/,$//')
+                
+                echo "Operator address list: $operator_address_list"
+                
+                if [ -n "$operator_address_list" ]; then
+                    # Construct and execute the cast command
+                    cast_command="~/.foundry/bin/cast send 0xeCd099fA5048c3738a5544347D8cBc8076E76494 --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \"updateOperatorsForQuorum(address[][],bytes)\" [[${operator_address_list}]] 0x00 --rpc-url http://ethereum:8545"
+                    
+                    echo "Executing cast command..."
+                    eval "$cast_command"
+                    
+                    # Create flag file in /tmp to indicate quorum has been updated
+                    touch "/tmp/quorum_updated"
+                    echo "Quorum updated successfully"
+                else
+                    echo "No operator addresses found!"
+                fi
+            else
+                echo "Quorum already updated (flag file exists)"
+            fi
+
+            sig_verification=$(~/.foundry/bin/cast call $BLS_SIGNATURE_CHECKER_ADDRESS \
+            "checkSignatures(bytes32,bytes,uint32,(uint32[],(uint256,uint256)[],(uint256,uint256)[],(uint256[2],uint256[2]),(uint256,uint256),uint32[],uint32[],uint32[][]))" \
+            $MSG_HASH \
+            $QUORUM_NUMBERS \
+            $REF_BLOCK_NUMBER \
+            "([$NON_SIGNER_BITMAP_INDICES_0,$NON_SIGNER_BITMAP_INDICES_1],\
+            [($NON_SIGNER_PUBLIC_KEYS_0_X,$NON_SIGNER_PUBLIC_KEYS_0_Y),($NON_SIGNER_PUBLIC_KEYS_1_X,$NON_SIGNER_PUBLIC_KEYS_1_Y)],\
+            [($APK_G1_X,$APK_G1_Y)],\
+            ([$APK_G2_X1,$APK_G2_X2],[$APK_G2_Y1,$APK_G2_Y2]),\
+            ($SIG_G1_X,$SIG_G1_Y),\
+            [$QUORUM_APK_INDICES],\
+            [$TOTAL_STAKE_INDICES],\
+            [[$NON_SIGNER_STAKE_INDICES_0,$NON_SIGNER_STAKE_INDICES_1]])" \
+            --rpc-url http://ethereum:8545)
+            echo "Signature Verification: $sig_verification"
+
+        else 
+            echo "Request failed"
+        fi
+    fi
     sleep 5
 done 
