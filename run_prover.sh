@@ -2,7 +2,7 @@
 
 # Clean up any existing flag files at startup
 rm -f /tmp/quorum_updated
-
+debug_mode=false
 counter=0
 address=$(~/.foundry/bin/cast wallet address $PRIVATE_KEY)
 platform=api.cloudflare.com
@@ -70,11 +70,19 @@ while true; do
             echo "Combined proof saved as combined_proof_$counter.json"
             echo "Submitting combined proof for verification..."
             response=$(curl -X POST -H "Content-Type: application/json" -d @combined_proof_$counter.json "$node_url:6074/verify")
-            echo "Verify Response: $response"
+
+            # Debug: Print verify response
+            if [ "$debug_mode" = true ]; then
+                echo "Verify Response: $response"
+            fi
 
             # Send to aggregator and capture its response
             aggregator_response=$(curl -X POST -d "$response" http://127.0.0.1:5074/aggregate)
-            echo "Aggregator Response: $aggregator_response"
+
+            # Debug: Print aggregator response
+            if [ "$debug_mode" = true ]; then
+                echo "Aggregator Response: $aggregator_response"
+            fi
 
             # Extract values from aggregator response
             NON_SIGNER_BITMAP_INDICES_0=$(echo $aggregator_response | jq -r '.non_signer_bitmap_indices[0]')
@@ -105,22 +113,28 @@ while true; do
             # Check if we've already updated quorum (using a flag file in /tmp)
             if [ ! -f "/tmp/quorum_updated" ]; then
                 echo "Updating quorum..."
-                
-                # Debug: List all files in operator_keys directory
-                echo "Contents of /app/operator_keys:"
-                ls -la /app/operator_keys
+               
+               # Debug: List all files in operator_keys directory
+                if [ "$debug_mode" = true ]; then
+                    echo "Contents of /app/operator_keys:"
+                    ls -la /app/operator_keys
+                fi
                 
                 # Get all operator addresses from key files and sort them hexadecimally
                 operator_addresses=$(find "/app/operator_keys" -name "testacc*.ecdsa.key.json" -exec jq -r '"0x" + .address' {} \; | sort -k1.3)
                 
                 # Debug: Show found addresses
-                echo "Found operator addresses:"
-                echo "$operator_addresses"
+                if [ "$debug_mode" = true ]; then
+                    echo "Found operator addresses:"
+                    echo "$operator_addresses"
+                fi
                 
                 # Convert newline-separated addresses into comma-separated list for cast command
                 operator_address_list=$(echo "$operator_addresses" | tr '\n' ',' | sed 's/,$//')
                 
-                echo "Operator address list: $operator_address_list"
+                if [ "$debug_mode" = true ]; then
+                    echo "Operator address list: $operator_address_list"
+                fi
                 
                 if [ -n "$operator_address_list" ]; then
                     # Construct and execute the cast command
