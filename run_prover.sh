@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Clean up any existing flag files at startup
+rm -f /tmp/quorum_updated
+
 counter=0
 address=$(~/.foundry/bin/cast wallet address $PRIVATE_KEY)
 platform=kalshi # TODO: these are not right, which means they are not being checked in the verify step - fix this.
