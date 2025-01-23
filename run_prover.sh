@@ -75,7 +75,17 @@ while true; do
             if echo "$response" | grep -q "Error verifying session proof" || \
                echo "$response" | grep -q "Error verifying substrings proof" || \
                echo "$response" | grep -q "Failed to parse proof" || \
-               echo "$response" | grep -q "Failed to verify against notary public key"; then
+               echo "$response" | grep -q "Failed to verify against notary public key" || \
+               echo "$response" | grep -q "Resource value .* does not match expected" || \
+               echo "$response" | grep -q "Resource .* not found in response" || \
+               echo "$response" | grep -q "Invalid HTTP response format" || \
+               echo "$response" | grep -q "Failed to parse JSON response" || \
+               echo "$response" | grep -q "No 'result' object found in response" || \
+               echo "$response" | grep -q "Resource value is not a string" || \
+               echo "$response" | grep -q "Server name does not match platform" || \
+               echo "$response" | grep -q "Commitment timestamp is too old" || \
+               echo "$response" | grep -q "Invalid commitment signature" || \
+               echo "$response" | grep -q "Invalid node selector signature"; then
                 echo "Verification failed with error: $response"
                 sleep 5
                 continue
@@ -89,21 +99,29 @@ while true; do
             # Send to aggregator and capture its response
             aggregator_response=$(curl -X POST -d "$response" http://127.0.0.1:5074/aggregate)
 
-            # Debug: Print aggregator response
-            if [ "$debug_mode" = true ]; then
-                echo "Aggregator Response: $aggregator_response"
-            fi
-
             # Check for aggregator errors
             if [ -z "$aggregator_response" ] || \
                [ "$aggregator_response" = "{}" ] || \
+               echo "$aggregator_response" | grep -q "Failed to parse outer JSON" || \
+               echo "$aggregator_response" | grep -q "Failed to get inner JSON string" || \
+               echo "$aggregator_response" | grep -q "Failed to parse inner JSON" || \
                echo "$aggregator_response" | grep -q "Failed to process signature" || \
                echo "$aggregator_response" | grep -q "Error in aggregation response" || \
                echo "$aggregator_response" | grep -q "Timeout waiting for aggregation response" || \
-               echo "$aggregator_response" | grep -q "Aggregation channel closed without response"; then
+               echo "$aggregator_response" | grep -q "Aggregation channel closed without response" || \
+               echo "$aggregator_response" | grep -q "No signature field found in JSON" || \
+               echo "$aggregator_response" | grep -q "No operator_address field found in JSON" || \
+               echo "$aggregator_response" | grep -q "No operator_id field found in JSON" || \
+               echo "$aggregator_response" | grep -q "No commitment_hash field found in JSON" || \
+               echo "$aggregator_response" | grep -q "No task_index field found in JSON"; then
                 echo "Aggregation failed with error: $aggregator_response"
                 sleep 5
                 continue
+            fi
+
+            # Debug: Print aggregator response
+            if [ "$debug_mode" = true ]; then
+                echo "Aggregator Response: $aggregator_response"
             fi
 
             # Extract values from aggregator response
