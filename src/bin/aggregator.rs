@@ -144,7 +144,7 @@ async fn aggregate_sigs(input: String) -> Json<serde_json::Value> {
         .as_u64()
         .unwrap_or(0);
 
-    info!("Extracted values:");
+    debug!("Extracted values:");
     debug!("Signature: {}", signature);
     debug!("Operator address: {}", operator_address); 
     debug!("Commitment hash: {}", commitment_hash);
