@@ -1,7 +1,6 @@
 // once threshold is reached, send the aggregated signature to something onchain (eas maybe?)
 use ark_bn254::g1::G1Affine;
 use num::bigint::BigUint;
-use eigen_services_blsaggregation::bls_aggregation_service_response::BlsAggregationServiceResponse;
 use eigen_services_blsaggregation::bls_agg::BlsAggregatorService;
 use eigen_client_avsregistry::reader::AvsRegistryChainReader;
 use eigen_logging::{get_logger, init_logger};
@@ -9,7 +8,7 @@ use eigen_logging::logger::Logger;
 use eigen_logging::noop_logger::NoopLogger;
 use eigen_services_avsregistry::chaincaller::AvsRegistryServiceChainCaller;
 use eigen_services_operatorsinfo::operatorsinfo_inmemory::OperatorInfoServiceInMemory;
-use eigen_crypto_bls::{Signature, BlsG2Point};
+use eigen_crypto_bls::Signature;
 use eigen_types::{
     avs::TaskResponseDigest,
     operator::QuorumThresholdPercentages,
@@ -20,7 +19,6 @@ use alloy_network::Ethereum;
 use url::Url;
 use std::time::Duration;
 use std::str::FromStr;
-use ark_bn254::g2::G2Affine;
 use std::sync::Arc;
 use ark_ec::AffineRepr;
 use ark_ff::PrimeField;
@@ -30,7 +28,7 @@ use axum::{
     Json,
     Router,
 };
-use tracing::info;
+use tracing::{info, debug, error};
 use tokio_util::sync::CancellationToken;
 use tokio::{task, time::sleep};
 
@@ -81,13 +79,13 @@ pub async fn run_aggregator() -> eyre::Result<()> {
 }
 
 async fn aggregate_sigs(input: String) -> Json<serde_json::Value> {
-    println!("Aggregating signatures...");
+    info!("Aggregating signatures...");
     
     // First parse to get the outer JSON structure
     let outer_parsed: serde_json::Value = match serde_json::from_str(&input) {
         Ok(v) => v,
         Err(e) => {
-            println!("Failed to parse outer JSON: {}", e);
+            error!("Failed to parse outer JSON: {}", e);
             return Json(serde_json::Value::default());
         }
     };
@@ -96,7 +94,7 @@ async fn aggregate_sigs(input: String) -> Json<serde_json::Value> {
     let inner_json = match outer_parsed.as_str() {
         Some(s) => s,
         None => {
-            println!("Failed to get inner JSON string");
+            error!("Failed to get inner JSON string");
             return Json(serde_json::Value::default());
         }
     };
@@ -105,37 +103,37 @@ async fn aggregate_sigs(input: String) -> Json<serde_json::Value> {
     let parsed_response: serde_json::Value = match serde_json::from_str(inner_json) {
         Ok(v) => v,
         Err(e) => {
-            println!("Failed to parse inner JSON: {}", e);
+            error!("Failed to parse inner JSON: {}", e);
             return Json(serde_json::Value::default());
         }
     };
     
-    println!("Parsed JSON structure: {:#?}", parsed_response);
+    debug!("Parsed JSON structure: {:#?}", parsed_response);
 
     // Now check for the fields
     match parsed_response.get("signature") {
-        Some(sig) => println!("Found signature field: {:?}", sig),
-        None => println!("No signature field found in JSON"),
+        Some(sig) => debug!("Found signature field: {:?}", sig),
+        None => error!("No signature field found in JSON"),
     }
 
     match parsed_response.get("operator_address") {
-        Some(addr) => println!("Found operator_address field: {:?}", addr),
-        None => println!("No operator_address field found in JSON"),
+        Some(addr) => debug!("Found operator_address field: {:?}", addr),
+        None => error!("No operator_address field found in JSON"),
     }
 
     match parsed_response.get("operator_id") {
-        Some(hash) => println!("Found operator_id field: {:?}", hash),
-        None => println!("No operator_id field found in JSON"),
+        Some(hash) => debug!("Found operator_id field: {:?}", hash),
+        None => error!("No operator_id field found in JSON"),
     }
 
     match parsed_response.get("commitment_hash") {
-        Some(hash) => println!("Found commitment_hash field: {:?}", hash),
-        None => println!("No commitment_hash field found in JSON"),
+        Some(hash) => debug!("Found commitment_hash field: {:?}", hash),
+        None => error!("No commitment_hash field found in JSON"),
     }
 
     match parsed_response.get("task_index") {
-        Some(task_index) => println!("Found task_index field: {:?}", task_index),
-        None => println!("No task_index field found in JSON"),
+        Some(task_index) => debug!("Found task_index field: {:?}", task_index),
+        None => error!("No task_index field found in JSON"),
     }
 
     let signature = parsed_response["signature"].as_str().unwrap_or("not found");
@@ -146,11 +144,11 @@ async fn aggregate_sigs(input: String) -> Json<serde_json::Value> {
         .as_u64()
         .unwrap_or(0);
 
-    println!("Extracted values:");
-    println!("Signature: {}", signature);
-    println!("Operator address: {}", operator_address); 
-    println!("Commitment hash: {}", commitment_hash);
-    println!("Task index: {}", task_index);
+    info!("Extracted values:");
+    debug!("Signature: {}", signature);
+    debug!("Operator address: {}", operator_address); 
+    debug!("Commitment hash: {}", commitment_hash);
+    debug!("Task index: {}", task_index);
 
     let registry_coordinator_address: Address = address!("eCd099fA5048c3738a5544347D8cBc8076E76494").into(); // TODO: get from config
     let operator_state_retriever_address: Address = address!("D5D7fB4647cE79740E6e83819EFDf43fa74F8C31").into(); // TODO: get from config
@@ -189,7 +187,7 @@ async fn aggregate_sigs(input: String) -> Json<serde_json::Value> {
         let _ = tx.send(()).await;  // Signal that the service has stopped
     });
 
-    println!("waiting for services to initialize...");
+    info!("waiting for services to initialize...");
     sleep(Duration::from_secs(2)).await;
 
     let avs_registry_service = AvsRegistryServiceChainCaller::new(
@@ -204,12 +202,12 @@ async fn aggregate_sigs(input: String) -> Json<serde_json::Value> {
     );
 
     // Initialize the task
-    println!("Initializing task...");
-    println!("Task index: {:?}", task_index);
-    println!("Current block number: {:?}", current_block_num);
-    println!("Quorum nums: {:?}", quorum_nums);
-    println!("Quorum threshold percentages: {:?}", quorum_threshold_percentages);
-    println!("Time to expiry: {:?}", time_to_expiry);
+    info!("Initializing task...");
+    debug!("Task index: {:?}", task_index);
+    debug!("Current block number: {:?}", current_block_num);
+    debug!("Quorum nums: {:?}", quorum_nums);
+    debug!("Quorum threshold percentages: {:?}", quorum_threshold_percentages);
+    debug!("Time to expiry: {:?}", time_to_expiry);
     bls_agg_service
         .initialize_new_task(
             task_index as u32,
@@ -220,13 +218,12 @@ async fn aggregate_sigs(input: String) -> Json<serde_json::Value> {
         )
         .await
         .unwrap();
-    println!("Task initialized.");
 
-    println!("Processing signature...");
-    println!("Task index: {:?}", task_index);
-    println!("Commitment hash: {:?}", commitment_hash);
-    println!("Signature: {:?}", signature);
-    println!("Operator ID: {:?}", operator_id);
+    info!("Processing signature...");
+    debug!("Task index: {:?}", task_index);
+    debug!("Commitment hash: {:?}", commitment_hash);
+    debug!("Signature: {:?}", signature);
+    debug!("Operator ID: {:?}", operator_id);
     
     // Process the signature
     let process_result = bls_agg_service
@@ -240,16 +237,16 @@ async fn aggregate_sigs(input: String) -> Json<serde_json::Value> {
 
     match process_result {
         Ok(_) => {
-            println!("Successfully processed signature");
+            info!("Successfully processed signature");
             
             // Wait for aggregated response with timeout
-            println!("Waiting for aggregated response...");
+            info!("Waiting for aggregated response...");
             match tokio::time::timeout(
                 Duration::from_secs(10),
                 bls_agg_service.aggregated_response_receiver.lock().await.recv()
             ).await {
                 Ok(Some(Ok(response))) => {
-                    println!("BLS aggregation response: {:?}", response);
+                    debug!("BLS aggregation response: {:?}", response);
                     cancellation_token.cancel();
                     // Convert to stringified format
                     let stringified = serde_json::json!({
@@ -281,24 +278,24 @@ async fn aggregate_sigs(input: String) -> Json<serde_json::Value> {
                     Json(stringified)
                 }
                 Ok(Some(Err(e))) => {
-                    println!("Error in aggregation response: {:?}", e);
+                    error!("Error in aggregation response: {:?}", e);
                     cancellation_token.cancel();
                     Json(serde_json::Value::default())
                 }
                 Ok(None) => {
-                    println!("Aggregation channel closed without response");
+                    error!("Aggregation channel closed without response");
                     cancellation_token.cancel();
                     Json(serde_json::Value::default())
                 }
                 Err(_) => {
-                    println!("Timeout waiting for aggregation response");
+                    error!("Timeout waiting for aggregation response");
                     cancellation_token.cancel();
                     Json(serde_json::Value::default())
                 }
             }
         }
         Err(e) => {
-            println!("Failed to process signature: {:?}", e);
+            error!("Failed to process signature: {:?}", e);
             cancellation_token.cancel();
             Json(serde_json::Value::default())
         }
