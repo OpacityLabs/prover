@@ -120,7 +120,10 @@ while true; do
 
             
             # Process successful aggregation response
-
+                else 
+                    echo "Request failed"
+                fi
+            done
             # Check for aggregator errors
             if [ -z "$aggregator_response" ] || \
                [ "$aggregator_response" = "{}" ] || \
@@ -146,31 +149,42 @@ while true; do
                 echo "Aggregator Response: $aggregator_response"
             fi
 
-        else 
-            echo "Request failed"
-        fi
-    done
-    # Extract values from aggregator response
-    NON_SIGNER_BITMAP_INDICES_0=$(echo $aggregator_response | jq -r '.non_signer_bitmap_indices[0]')
-    NON_SIGNER_BITMAP_INDICES_1=$(echo $aggregator_response | jq -r '.non_signer_bitmap_indices[1]')
-    NON_SIGNER_PUBLIC_KEYS_0_X=$(echo $aggregator_response | jq -r '.non_signer_public_keys[0].x')
-    NON_SIGNER_PUBLIC_KEYS_0_Y=$(echo $aggregator_response | jq -r '.non_signer_public_keys[0].y')
-    NON_SIGNER_PUBLIC_KEYS_1_X=$(echo $aggregator_response | jq -r '.non_signer_public_keys[1].x')
-    NON_SIGNER_PUBLIC_KEYS_1_Y=$(echo $aggregator_response | jq -r '.non_signer_public_keys[1].y')
-    QUORUM_APK_INDICES=$(echo $aggregator_response | jq -r '.quorum_apk_indices[0]')
-    TOTAL_STAKE_INDICES=$(echo $aggregator_response | jq -r '.total_stake_indices[0]')
-    NON_SIGNER_STAKE_INDICES_0=$(echo $aggregator_response | jq -r '.non_signer_stake_indices[0][0]')
-    NON_SIGNER_STAKE_INDICES_1=$(echo $aggregator_response | jq -r '.non_signer_stake_indices[0][1]')
-    SIG_G1_X=$(echo $aggregator_response | jq -r '.sig_g1_x')
-    SIG_G1_Y=$(echo $aggregator_response | jq -r '.sig_g1_y')
-    APK_G1_X=$(echo $aggregator_response | jq -r '.apk_g1_x')
-    APK_G1_Y=$(echo $aggregator_response | jq -r '.apk_g1_y')
-    APK_G2_X1=$(echo $aggregator_response | jq -r '.apk_g2_x1')
-    APK_G2_X2=$(echo $aggregator_response | jq -r '.apk_g2_x2')
-    APK_G2_Y1=$(echo $aggregator_response | jq -r '.apk_g2_y1')
-    APK_G2_Y2=$(echo $aggregator_response | jq -r '.apk_g2_y2')
-    MSG_HASH=$(echo $aggregator_response | jq -r '.task_response_digest')
-    QUORUM_NUMBERS="0x00"
+            # Extract values from aggregator response more safely
+            NON_SIGNER_COUNT=$(echo $aggregator_response | jq -r '.non_signer_bitmap_indices | length')
+            echo "Number of non-signers: $NON_SIGNER_COUNT"
+
+            # Build the non-signer arrays dynamically
+            BITMAP_INDICES_ARR=$(echo $aggregator_response | jq -r '.non_signer_bitmap_indices | join(",")')
+            BITMAP_INDICES_ARR=${BITMAP_INDICES_ARR:-""}
+
+            # Build the public keys arrays
+            PUBLIC_KEYS_ARR=""
+            for i in $(seq 0 $(($NON_SIGNER_COUNT - 1))); do
+                if [ $i -gt 0 ]; then
+                    PUBLIC_KEYS_ARR="$PUBLIC_KEYS_ARR,"
+                fi
+                x=$(echo $aggregator_response | jq -r ".non_signer_public_keys[$i].x")
+                y=$(echo $aggregator_response | jq -r ".non_signer_public_keys[$i].y")
+                PUBLIC_KEYS_ARR="$PUBLIC_KEYS_ARR($x,$y)"
+            done
+
+            # Build the stake indices array
+            STAKE_INDICES_ARR=$(echo $aggregator_response | jq -r '.non_signer_stake_indices[0] | join(",")')
+            STAKE_INDICES_ARR=${STAKE_INDICES_ARR:-""}
+
+            # Extract other required values
+            QUORUM_APK_INDICES=$(echo $aggregator_response | jq -r '.quorum_apk_indices[0]')
+            TOTAL_STAKE_INDICES=$(echo $aggregator_response | jq -r '.total_stake_indices[0]')
+            SIG_G1_X=$(echo $aggregator_response | jq -r '.sig_g1_x')
+            SIG_G1_Y=$(echo $aggregator_response | jq -r '.sig_g1_y')
+            APK_G1_X=$(echo $aggregator_response | jq -r '.apk_g1_x')
+            APK_G1_Y=$(echo $aggregator_response | jq -r '.apk_g1_y')
+            APK_G2_X1=$(echo $aggregator_response | jq -r '.apk_g2_x1')
+            APK_G2_X2=$(echo $aggregator_response | jq -r '.apk_g2_x2')
+            APK_G2_Y1=$(echo $aggregator_response | jq -r '.apk_g2_y1')
+            APK_G2_Y2=$(echo $aggregator_response | jq -r '.apk_g2_y2')
+            MSG_HASH=$(echo $aggregator_response | jq -r '.task_response_digest')
+            QUORUM_NUMBERS="0x00"
 
             # Get current block and set reference block
             CURRENT_BLOCK=$(~/.foundry/bin/cast block latest --rpc-url http://ethereum:8545 | grep "number" | awk '{print $2}')
@@ -227,14 +241,14 @@ while true; do
             $MSG_HASH \
             $QUORUM_NUMBERS \
             $REF_BLOCK_NUMBER \
-            "([$NON_SIGNER_BITMAP_INDICES_0,$NON_SIGNER_BITMAP_INDICES_1],\
-            [($NON_SIGNER_PUBLIC_KEYS_0_X,$NON_SIGNER_PUBLIC_KEYS_0_Y),($NON_SIGNER_PUBLIC_KEYS_1_X,$NON_SIGNER_PUBLIC_KEYS_1_Y)],\
+            "([$BITMAP_INDICES_ARR],\
+            [$PUBLIC_KEYS_ARR],\
             [($APK_G1_X,$APK_G1_Y)],\
             ([$APK_G2_X1,$APK_G2_X2],[$APK_G2_Y1,$APK_G2_Y2]),\
             ($SIG_G1_X,$SIG_G1_Y),\
             [$QUORUM_APK_INDICES],\
             [$TOTAL_STAKE_INDICES],\
-            [[$NON_SIGNER_STAKE_INDICES_0,$NON_SIGNER_STAKE_INDICES_1]])" \
+            [[$STAKE_INDICES_ARR]])" \
             --rpc-url http://ethereum:8545)
             echo "Signature Verification: $sig_verification"
 
