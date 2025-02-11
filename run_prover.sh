@@ -251,10 +251,5 @@ while true; do
             [[$STAKE_INDICES_ARR]])" \
             --rpc-url http://ethereum:8545)
             echo "Signature Verification: $sig_verification"
-
-        else 
-            echo "Request failed"
-        fi
-    fi
     sleep 5
 done 
