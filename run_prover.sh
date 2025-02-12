@@ -14,6 +14,9 @@ echo "starting aggregator"
 /usr/bin/aggregator &
 echo "starting prover"
 while true; do
+    echo "########################################################"
+    echo "~~~~~~~~~~~~~   STARTING NEW ATTESTATION   ~~~~~~~~~~~~~"
+    echo "########################################################"
     # Add random operator count selection
     operator_count=$((RANDOM % 3 + 1))
     echo "operator_count for this notorization: $operator_count"
@@ -26,7 +29,7 @@ while true; do
     # Outer loop runs until we get enough successful proofs
     while [ $successful_proofs -lt $operator_count ]; do
     echo "########################################################"
-    echo "starting new session"
+    echo "                starting new notarization"
     echo "########################################################"
         node_selector_response=$(curl -X POST -H "Content-Type: application/json" -d '{
             "address": "'"$address"'",
@@ -40,7 +43,9 @@ while true; do
         node_url=$(echo $node_selector_response | jq -r '.node_url')
         task_index=$(echo $node_selector_response | jq -r '.task_index')
         echo "Task index: $task_index"
-# TODO: this is not checking if the node_url is valid - it just keeps spamming the nodeselector, and nodeselector gives it a new task everytime.
+
+        echo "node_url: $node_url"
+        echo "node_selector_response: $node_selector_response"
         if [ -z "$node_url" ] || [ "$node_url" == "null" ]; then
             echo "Failed to get a valid node_url. Retrying in 5 seconds..."
             sleep 5
@@ -251,5 +256,4 @@ while true; do
             [[$STAKE_INDICES_ARR]])" \
             --rpc-url http://ethereum:8545)
             echo "Signature Verification: $sig_verification"
-    sleep 5
 done 
