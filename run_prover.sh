@@ -2,6 +2,7 @@
 
 # Clean up any existing flag files at startup
 rm -f /tmp/quorum_updated
+
 debug_mode=false
 counter=0
 address=$(~/.foundry/bin/cast wallet address $PRIVATE_KEY)
