@@ -2,7 +2,7 @@
 
 # Clean up any existing flag files at startup
 rm -f /tmp/quorum_updated
-debug_mode=false
+debug_mode=true
 counter=0
 address=$(~/.foundry/bin/cast wallet address $PRIVATE_KEY)
 platform=api.cloudflare.com
@@ -31,7 +31,8 @@ while true; do
     echo "########################################################"
     echo "                starting new notarization"
     echo "########################################################"
-        node_selector_response=$(curl -X POST -H "Content-Type: application/json" -d '{
+                # Prepare request data with conditional task_index
+        request_data='{
             "address": "'"$address"'",
             "platform": "'"$platform"'",
             "resource": "'"$resource"'",
@@ -39,11 +40,25 @@ while true; do
             "threshold": '"$threshold"',
             "signature": "'"$signature"'",
             "operator_count": '"$operator_count"'
-        }' "$NODE_SELECTOR")
+        }'
+        
+        # Add task_index to request if we have one
+        if [ ! -z "$task_index" ]; then
+            request_data=$(echo $request_data | jq '. + {"task_index": '"$task_index"'}')
+        fi
+        
+        node_selector_response=$(curl -X POST -H "Content-Type: application/json" -d "$request_data" "$NODE_SELECTOR")
+        
+        # Extract node_url and task_index from response
         node_url=$(echo $node_selector_response | jq -r '.node_url')
-        task_index=$(echo $node_selector_response | jq -r '.task_index')
+        new_task_index=$(echo $node_selector_response | jq -r '.task_index')
+        
+        # Store task_index if this is our first request
+        if [ -z "$task_index" ]; then
+            task_index=$new_task_index
+        fi
+        
         echo "Task index: $task_index"
-
         echo "node_url: $node_url"
         echo "node_selector_response: $node_selector_response"
         if [ -z "$node_url" ] || [ "$node_url" == "null" ]; then
@@ -256,4 +271,5 @@ while true; do
             [[$STAKE_INDICES_ARR]])" \
             --rpc-url http://ethereum:8545)
             echo "Signature Verification: $sig_verification"
+            task_index=""
 done 
