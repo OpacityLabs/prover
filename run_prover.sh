@@ -194,7 +194,7 @@ while true; do
                 
                 if [ -n "$operator_address_list" ]; then
                     # Construct and execute the cast command
-                    cast_command="~/.foundry/bin/cast send 0xeCd099fA5048c3738a5544347D8cBc8076E76494 --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \"updateOperatorsForQuorum(address[][],bytes)\" [[${operator_address_list}]] 0x00 --rpc-url http://ethereum:8545"
+                    cast_command="~/.foundry/bin/cast send $REGISTRY_COORDINATOR_ADDRESS --private-key $PRIVATE_KEY \"updateOperatorsForQuorum(address[][],bytes)\" [[${operator_address_list}]] 0x00 --rpc-url $RPC_URL"
                     
                     echo "Executing cast command..."
                     eval "$cast_command"
@@ -212,7 +212,7 @@ while true; do
             # Execute checkSignatures call
             echo "verifying signature onchain..."
 
-            sig_verification=$(~/.foundry/bin/cast call $BLS_SIGNATURE_CHECKER_ADDRESS \
+            sig_verification=$(~/.foundry/bin/cast send $BLS_SIGNATURE_CHECKER_ADDRESS \
             "checkSignatures(bytes32,bytes,uint32,(uint32[],(uint256,uint256)[],(uint256,uint256)[],(uint256[2],uint256[2]),(uint256,uint256),uint32[],uint32[],uint32[][]))" \
             $MSG_HASH \
             $QUORUM_NUMBERS \
@@ -225,7 +225,8 @@ while true; do
             [$QUORUM_APK_INDICES],\
             [$TOTAL_STAKE_INDICES],\
             [[$STAKE_INDICES_ARR]])" \
-            --rpc-url $RPC_URL)
+            --rpc-url $RPC_URL \
+            --private-key $PRIVATE_KEY)
             echo "Signature Verification: $sig_verification"
 
         else 
