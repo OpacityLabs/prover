@@ -3,11 +3,12 @@
 # Clean up any existing flag files at startup
 rm -f /tmp/quorum_updated
 
+debug_mode=false
 counter=0
 address=$(~/.foundry/bin/cast wallet address $PRIVATE_KEY)
-platform=kalshi
-resource=open_time
-value=10:00:00UTC
+platform=api.cloudflare.com
+resource=model
+value=gpt-4o-mini
 threshold=1 
 signature=$(~/.foundry/bin/cast wallet sign --private-key $PRIVATE_KEY $platform$resource$value$threshold)
 echo "starting aggregator"
@@ -70,23 +71,86 @@ while true; do
             echo "Combined proof saved as combined_proof_$counter.json"
             echo "Submitting combined proof for verification..."
             response=$(curl -X POST -H "Content-Type: application/json" -d @combined_proof_$counter.json "$node_url:6074/verify")
-            echo "Verify Response: $response"
+
+            # Check for verification errors
+            if echo "$response" | grep -q "Error verifying session proof" || \
+               echo "$response" | grep -q "Error verifying substrings proof" || \
+               echo "$response" | grep -q "Failed to parse proof" || \
+               echo "$response" | grep -q "Failed to verify against notary public key" || \
+               echo "$response" | grep -q "Resource value .* does not match expected" || \
+               echo "$response" | grep -q "Resource .* not found in response" || \
+               echo "$response" | grep -q "Invalid HTTP response format" || \
+               echo "$response" | grep -q "Failed to parse JSON response" || \
+               echo "$response" | grep -q "No 'result' object found in response" || \
+               echo "$response" | grep -q "Resource value is not a string" || \
+               echo "$response" | grep -q "Server name does not match platform" || \
+               echo "$response" | grep -q "Commitment timestamp is too old" || \
+               echo "$response" | grep -q "Invalid commitment signature" || \
+               echo "$response" | grep -q "Invalid node selector signature"; then
+                echo "Verification failed with error: $response"
+                sleep 5
+                continue
+            fi
+
+            # Debug: Print verify response
+            if [ "$debug_mode" = true ]; then
+                echo "Verify Response: $response"
+            fi
 
             # Send to aggregator and capture its response
             aggregator_response=$(curl -X POST -d "$response" http://127.0.0.1:5074/aggregate)
-            echo "Aggregator Response: $aggregator_response"
 
-            # Extract values from aggregator response
-            NON_SIGNER_BITMAP_INDICES_0=$(echo $aggregator_response | jq -r '.non_signer_bitmap_indices[0]')
-            NON_SIGNER_BITMAP_INDICES_1=$(echo $aggregator_response | jq -r '.non_signer_bitmap_indices[1]')
-            NON_SIGNER_PUBLIC_KEYS_0_X=$(echo $aggregator_response | jq -r '.non_signer_public_keys[0].x')
-            NON_SIGNER_PUBLIC_KEYS_0_Y=$(echo $aggregator_response | jq -r '.non_signer_public_keys[0].y')
-            NON_SIGNER_PUBLIC_KEYS_1_X=$(echo $aggregator_response | jq -r '.non_signer_public_keys[1].x')
-            NON_SIGNER_PUBLIC_KEYS_1_Y=$(echo $aggregator_response | jq -r '.non_signer_public_keys[1].y')
+            # Check for aggregator errors
+            if [ -z "$aggregator_response" ] || \
+               [ "$aggregator_response" = "{}" ] || \
+               echo "$aggregator_response" | grep -q "Failed to parse outer JSON" || \
+               echo "$aggregator_response" | grep -q "Failed to get inner JSON string" || \
+               echo "$aggregator_response" | grep -q "Failed to parse inner JSON" || \
+               echo "$aggregator_response" | grep -q "Failed to process signature" || \
+               echo "$aggregator_response" | grep -q "Error in aggregation response" || \
+               echo "$aggregator_response" | grep -q "Timeout waiting for aggregation response" || \
+               echo "$aggregator_response" | grep -q "Aggregation channel closed without response" || \
+               echo "$aggregator_response" | grep -q "No signature field found in JSON" || \
+               echo "$aggregator_response" | grep -q "No operator_address field found in JSON" || \
+               echo "$aggregator_response" | grep -q "No operator_id field found in JSON" || \
+               echo "$aggregator_response" | grep -q "No commitment_hash field found in JSON" || \
+               echo "$aggregator_response" | grep -q "No task_index field found in JSON"; then
+                echo "Aggregation failed with error: $aggregator_response"
+                sleep 5
+                continue
+            fi
+
+            # Debug: Print aggregator response
+            if [ "$debug_mode" = true ]; then
+                echo "Aggregator Response: $aggregator_response"
+            fi
+
+            # Extract values from aggregator response more safely
+            NON_SIGNER_COUNT=$(echo $aggregator_response | jq -r '.non_signer_bitmap_indices | length')
+            echo "Number of non-signers: $NON_SIGNER_COUNT"
+
+            # Build the non-signer arrays dynamically
+            BITMAP_INDICES_ARR=$(echo $aggregator_response | jq -r '.non_signer_bitmap_indices | join(",")')
+            BITMAP_INDICES_ARR=${BITMAP_INDICES_ARR:-""}
+
+            # Build the public keys arrays
+            PUBLIC_KEYS_ARR=""
+            for i in $(seq 0 $(($NON_SIGNER_COUNT - 1))); do
+                if [ $i -gt 0 ]; then
+                    PUBLIC_KEYS_ARR="$PUBLIC_KEYS_ARR,"
+                fi
+                x=$(echo $aggregator_response | jq -r ".non_signer_public_keys[$i].x")
+                y=$(echo $aggregator_response | jq -r ".non_signer_public_keys[$i].y")
+                PUBLIC_KEYS_ARR="$PUBLIC_KEYS_ARR($x,$y)"
+            done
+
+            # Build the stake indices array
+            STAKE_INDICES_ARR=$(echo $aggregator_response | jq -r '.non_signer_stake_indices[0] | join(",")')
+            STAKE_INDICES_ARR=${STAKE_INDICES_ARR:-""}
+
+            # Extract other required values
             QUORUM_APK_INDICES=$(echo $aggregator_response | jq -r '.quorum_apk_indices[0]')
             TOTAL_STAKE_INDICES=$(echo $aggregator_response | jq -r '.total_stake_indices[0]')
-            NON_SIGNER_STAKE_INDICES_0=$(echo $aggregator_response | jq -r '.non_signer_stake_indices[0][0]')
-            NON_SIGNER_STAKE_INDICES_1=$(echo $aggregator_response | jq -r '.non_signer_stake_indices[0][1]')
             SIG_G1_X=$(echo $aggregator_response | jq -r '.sig_g1_x')
             SIG_G1_Y=$(echo $aggregator_response | jq -r '.sig_g1_y')
             APK_G1_X=$(echo $aggregator_response | jq -r '.apk_g1_x')
@@ -101,29 +165,32 @@ while true; do
             # Get current block and set reference block
             CURRENT_BLOCK=$(~/.foundry/bin/cast block latest --rpc-url http://ethereum:8545 | grep "number" | awk '{print $2}')
             REF_BLOCK_NUMBER=$((CURRENT_BLOCK-1))
-
-            # Execute checkSignatures call
-            echo "verifying signature onchain..."
             
             # Check if we've already updated quorum (using a flag file in /tmp)
             if [ ! -f "/tmp/quorum_updated" ]; then
                 echo "Updating quorum..."
-                
-                # Debug: List all files in operator_keys directory
-                echo "Contents of /app/operator_keys:"
-                ls -la /app/operator_keys
+               
+               # Debug: List all files in operator_keys directory
+                if [ "$debug_mode" = true ]; then
+                    echo "Contents of /app/operator_keys:"
+                    ls -la /app/operator_keys
+                fi
                 
                 # Get all operator addresses from key files and sort them hexadecimally
                 operator_addresses=$(find "/app/operator_keys" -name "testacc*.ecdsa.key.json" -exec jq -r '"0x" + .address' {} \; | sort -k1.3)
                 
                 # Debug: Show found addresses
-                echo "Found operator addresses:"
-                echo "$operator_addresses"
+                if [ "$debug_mode" = true ]; then
+                    echo "Found operator addresses:"
+                    echo "$operator_addresses"
+                fi
                 
                 # Convert newline-separated addresses into comma-separated list for cast command
                 operator_address_list=$(echo "$operator_addresses" | tr '\n' ',' | sed 's/,$//')
                 
-                echo "Operator address list: $operator_address_list"
+                if [ "$debug_mode" = true ]; then
+                    echo "Operator address list: $operator_address_list"
+                fi
                 
                 if [ -n "$operator_address_list" ]; then
                     # Construct and execute the cast command
@@ -142,19 +209,22 @@ while true; do
                 echo "Quorum already updated (flag file exists)"
             fi
 
+            # Execute checkSignatures call
+            echo "verifying signature onchain..."
+
             sig_verification=$(~/.foundry/bin/cast call $BLS_SIGNATURE_CHECKER_ADDRESS \
             "checkSignatures(bytes32,bytes,uint32,(uint32[],(uint256,uint256)[],(uint256,uint256)[],(uint256[2],uint256[2]),(uint256,uint256),uint32[],uint32[],uint32[][]))" \
             $MSG_HASH \
             $QUORUM_NUMBERS \
             $REF_BLOCK_NUMBER \
-            "([$NON_SIGNER_BITMAP_INDICES_0,$NON_SIGNER_BITMAP_INDICES_1],\
-            [($NON_SIGNER_PUBLIC_KEYS_0_X,$NON_SIGNER_PUBLIC_KEYS_0_Y),($NON_SIGNER_PUBLIC_KEYS_1_X,$NON_SIGNER_PUBLIC_KEYS_1_Y)],\
+            "([$BITMAP_INDICES_ARR],\
+            [$PUBLIC_KEYS_ARR],\
             [($APK_G1_X,$APK_G1_Y)],\
             ([$APK_G2_X1,$APK_G2_X2],[$APK_G2_Y1,$APK_G2_Y2]),\
             ($SIG_G1_X,$SIG_G1_Y),\
             [$QUORUM_APK_INDICES],\
             [$TOTAL_STAKE_INDICES],\
-            [[$NON_SIGNER_STAKE_INDICES_0,$NON_SIGNER_STAKE_INDICES_1]])" \
+            [[$STAKE_INDICES_ARR]])" \
             --rpc-url http://ethereum:8545)
             echo "Signature Verification: $sig_verification"
 

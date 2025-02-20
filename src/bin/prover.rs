@@ -12,6 +12,7 @@ use tlsn_prover::tls::{state::Notarize, Prover, ProverConfig};
 use tokio::io::AsyncWriteExt as _;
 use tokio_util::compat::{FuturesAsyncReadCompatExt, TokioAsyncReadCompatExt};
 use std::net::ToSocketAddrs;
+use tracing::{debug, info, error};
 
 const MAX_SENT_DATA: usize = 1 << 13;
 const MAX_RECV_DATA: usize = 1 << 13;
@@ -39,12 +40,12 @@ async fn main() {
 
     let args: Vec<String> = std::env::args().collect();
     if args.len() != 3 {
-        eprintln!("Usage: {} <notary_host> <notary_port>", args[0]);
+        error!("Usage: {} <notary_host> <notary_port>", args[0]);
         std::process::exit(1);
     }
     let notary_host = args[1].clone();
     let notary_port = args[2].parse::<u16>().unwrap_or_else(|_| {
-        eprintln!("Invalid port number");
+        error!("Invalid port number");
         std::process::exit(1);
     });
 
@@ -62,28 +63,28 @@ async fn main() {
         .build()
         .unwrap();
 
-    println!("Setting up prover");
+    info!("Setting up prover");
     let prover = Prover::new(prover_config)
         .setup(notary_socket.compat())
         .await
         .unwrap();
 
-    println!("Setup prover");
-    println!("Attempting to resolve {}", notarization_request.host);
+    
+    info!("Attempting to resolve {}", notarization_request.host);
     match (notarization_request.host.as_str(), 443).to_socket_addrs() {
         Ok(addrs) => {
             for addr in addrs {
-                println!("Resolved address: {}", addr);
+                debug!("Resolved address: {}", addr);
             }
         }
-        Err(e) => println!("Failed to resolve host: {}", e),
+        Err(e) => error!("Failed to resolve host: {}", e),
     }
 
-    println!("Attempting connection to {}:443", notarization_request.host);
+    info!("Attempting connection to {}:443", notarization_request.host);
     let client_socket = match tokio::net::TcpStream::connect((notarization_request.host.as_str(), 443)).await {
         Ok(socket) => socket,
         Err(e) => {
-            eprintln!("Connection error: {}", e);
+            error!("Connection error: {}", e);
             panic!("Can't connect to server");
         }
     };
@@ -109,14 +110,14 @@ async fn main() {
 
     let request = builder.body(Empty::<Bytes>::new()).unwrap();
 
-    println!("Sending request to server: {:?}", request);
+    debug!("Sending request to server: {:?}", request);
 
     let response = request_sender.send_request(request).await.unwrap();
 
     assert!(response.status() == StatusCode::OK);
 
     let payload = response.into_body().collect().await.unwrap().to_bytes();
-    println!(
+    debug!(
         "Received response from server: {:?}",
         &String::from_utf8_lossy(&payload)
     );
@@ -137,31 +138,10 @@ async fn main() {
         .await
         .unwrap();
 
-    println!("Notarization completed successfully!");
-    println!("The proof has been written to `simple_proof.json`");
-    // Send proof to notary for verification
-    // let client = reqwest::Client::new();
-    // let verify_url = format!("http://{}:6074/verify", &notary_host);
-    
-    // let verify_response = client
-    //     .post(&verify_url)
-    //     .json(&proof)
-    //     .send()
-    //     .await
-    //     .unwrap();
-
-    // println!("Verification response status: {}", verify_response.status());
-    // if verify_response.status().is_success() {
-    //     println!("Proof successfully verified by notary");
-    // } else {
-    //     println!("Proof verification failed");
-    // }
-
+    info!("Notarization completed successfully!");
+    info!("The proof has been written to `simple_proof.json`");
 }
 
-/// Find the ranges of the public and private parts of a sequence.
-///
-/// Returns a tuple of `(public, private)` ranges.
 fn find_ranges(seq: &[u8], private_seq: &[&[u8]]) -> (Vec<Range<usize>>, Vec<Range<usize>>) {
     let mut private_ranges = Vec::new();
     for s in private_seq {
