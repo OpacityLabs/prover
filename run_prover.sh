@@ -212,7 +212,7 @@ while true; do
             # Execute checkSignatures call
             echo "verifying signature onchain..."
 
-            sig_verification=$(~/.foundry/bin/cast call $BLS_SIGNATURE_CHECKER_ADDRESS \
+            sig_verification=$(~/.foundry/bin/cast send $BLS_SIGNATURE_CHECKER_ADDRESS \
             "checkSignatures(bytes32,bytes,uint32,(uint32[],(uint256,uint256)[],(uint256,uint256)[],(uint256[2],uint256[2]),(uint256,uint256),uint32[],uint32[],uint32[][]))" \
             $MSG_HASH \
             $QUORUM_NUMBERS \
@@ -225,7 +225,8 @@ while true; do
             [$QUORUM_APK_INDICES],\
             [$TOTAL_STAKE_INDICES],\
             [[$STAKE_INDICES_ARR]])" \
-            --rpc-url $RPC_URL)
+            --rpc-url $RPC_URL \
+            --private-key $PRIVATE_KEY)
             echo "Signature Verification: $sig_verification"
 
         else 
