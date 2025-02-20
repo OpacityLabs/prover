@@ -163,7 +163,7 @@ while true; do
             QUORUM_NUMBERS="0x00"
 
             # Get current block and set reference block
-            CURRENT_BLOCK=$(~/.foundry/bin/cast block latest --rpc-url http://ethereum:8545 | grep "number" | awk '{print $2}')
+            CURRENT_BLOCK=$(~/.foundry/bin/cast block latest --rpc-url $RPC_URL | grep "number" | awk '{print $2}')
             REF_BLOCK_NUMBER=$((CURRENT_BLOCK-1))
             
             # Check if we've already updated quorum (using a flag file in /tmp)
@@ -225,7 +225,7 @@ while true; do
             [$QUORUM_APK_INDICES],\
             [$TOTAL_STAKE_INDICES],\
             [[$STAKE_INDICES_ARR]])" \
-            --rpc-url http://ethereum:8545)
+            --rpc-url $RPC_URL)
             echo "Signature Verification: $sig_verification"
 
         else 

@@ -1,4 +1,3 @@
-// once threshold is reached, send the aggregated signature to something onchain (eas maybe?)
 use ark_bn254::g1::G1Affine;
 use num::bigint::BigUint;
 use eigen_services_blsaggregation::bls_agg::BlsAggregatorService;
@@ -22,6 +21,8 @@ use std::str::FromStr;
 use std::sync::Arc;
 use ark_ec::AffineRepr;
 use ark_ff::PrimeField;
+use std::env;
+use dotenv::dotenv;
 
 use axum::{
     routing::post,
@@ -58,6 +59,7 @@ fn parse_signature(sig: &str) -> G1Affine {
 
 #[tokio::main]
 async fn main() {
+    dotenv().ok();
     let _a = run_aggregator().await;
 }
 
@@ -150,10 +152,24 @@ async fn aggregate_sigs(input: String) -> Json<serde_json::Value> {
     debug!("Commitment hash: {}", commitment_hash);
     debug!("Task index: {}", task_index);
 
-    let registry_coordinator_address: Address = address!("eCd099fA5048c3738a5544347D8cBc8076E76494").into(); // TODO: get from config
-    let operator_state_retriever_address: Address = address!("D5D7fB4647cE79740E6e83819EFDf43fa74F8C31").into(); // TODO: get from config
-    let http_endpoint = String::from("http://ethereum:8545"); // TODO: get from .env
-    let ws_endpoint = String::from("ws://ethereum:8545"); // TODO: get from .env
+    // Get addresses and URLs from environment variables
+    let registry_coordinator_address: Address = Address::from_str(
+        &env::var("REGISTRY_COORDINATOR_ADDRESS")
+            .expect("REGISTRY_COORDINATOR_ADDRESS must be set")
+    ).unwrap();
+    info!("Registry coordinator address: {}", registry_coordinator_address);
+
+    let operator_state_retriever_address: Address = Address::from_str(
+        &env::var("OPERATOR_STATE_RETRIEVER_ADDRESS")
+            .expect("OPERATOR_STATE_RETRIEVER_ADDRESS must be set")
+    ).unwrap();
+    info!("Operator state retriever address: {}", operator_state_retriever_address);
+    let http_endpoint = env::var("RPC_URL")
+        .expect("RPC_URL must be set");
+    info!("RPC URL: {}", http_endpoint);
+    let ws_endpoint = env::var("WEBSOCKET_RPC_URL")
+        .expect("WEBSOCKET_RPC_URL must be set");
+    info!("WebSocket URL: {}", ws_endpoint);
 
     let provider: RootProvider<_, Ethereum> = RootProvider::new_http(Url::parse(&http_endpoint).unwrap());
     let current_block_num = provider.get_block_number().await.unwrap();
@@ -300,5 +316,3 @@ async fn aggregate_sigs(input: String) -> Json<serde_json::Value> {
         }
     }
 }
-
-
