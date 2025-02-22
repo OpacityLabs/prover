@@ -1,9 +1,11 @@
 use ark_bn254::g1::G1Affine;
 use eigen_services_avsregistry::AvsRegistryService;
+use eigen_services_operatorsinfo::operator_info::OperatorInfoService;
 use num::bigint::BigUint;
 use eigen_services_blsaggregation::bls_agg::{BlsAggregatorService, TaskMetadata, TaskSignature};
 use eigen_client_avsregistry::reader::{AvsRegistryChainReader, AvsRegistryReader};
 use eigen_logging::{get_logger, init_logger};
+use alloy_provider::{Provider,RootProvider};
 use eigen_logging::logger::Logger;
 use eigen_logging::noop_logger::NoopLogger;
 use eigen_services_avsregistry::chaincaller::AvsRegistryServiceChainCaller;
@@ -14,7 +16,6 @@ use eigen_types::{
     operator::QuorumThresholdPercentages,
 };
 use alloy_primitives::{Address, Bytes, FixedBytes, address};
-use alloy_provider::{Provider, RootProvider};
 use alloy_network::Ethereum;
 use url::Url;
 use std::time::Duration;
@@ -173,9 +174,10 @@ async fn aggregate_sigs(input: String) -> Json<serde_json::Value> {
     info!("WebSocket URL: {}", ws_endpoint);
 
     let provider: RootProvider<_, Ethereum> = RootProvider::new_http(Url::parse(&http_endpoint).unwrap());
+    // let provider = Provider::new_http(Url::parse(&http_endpoint).unwrap());
     let current_block_num = provider.get_block_number().await.unwrap();
-    let quorum_nums = Bytes::from([0u8]);
-    let quorum_threshold_percentages: QuorumThresholdPercentages = vec![33];
+    let quorum_nums = Bytes::from([0x00]);
+    let quorum_threshold_percentages: QuorumThresholdPercentages = vec![0];
     let time_to_expiry = Duration::from_secs(1000);
 
     // Create avs clients to interact with contracts deployed on anvil
@@ -189,7 +191,14 @@ async fn aggregate_sigs(input: String) -> Json<serde_json::Value> {
     // info!("Quorums avs state: {:?}", quorums_avs_state);
     let operators_stake = avs_registry_reader.get_operators_stake_in_quorums_at_block(current_block_num as u32, quorum_nums.clone()).await.unwrap();
     info!("Operators stake");
+    info!("Number of operators: {}", operators_stake.len());
+    info!("First operator stake: {:?}", operators_stake[0][0].stake);
+    info!("First operator stake: {:?}", operators_stake[0][1].stake);
+    info!("First operator stake: {:?}", operators_stake[0][2].stake);
     let get_check_signatures_indices = avs_registry_reader.get_check_signatures_indices(current_block_num as u32, quorum_nums.to_vec(), vec![]).await.unwrap();
+    info!("Get check signatures indices: {:?}", get_check_signatures_indices.nonSignerQuorumBitmapIndices);
+    info!("Get check signatures indices: {:?}", get_check_signatures_indices.totalStakeIndices);
+    
     let operator_id_mock = avs_registry_reader.get_operator_id(Address::from_str(operator_address).unwrap()).await.unwrap();
     info!("Operator id mock: {:?}", operator_id_mock);
     // let get_quorums_avs_state_at_block = avs_registry_reader.get_quorums_avs_state_at_block(quorum_nums.to_vec(), current_block_num as u32).await.unwrap();
@@ -205,34 +214,34 @@ async fn aggregate_sigs(input: String) -> Json<serde_json::Value> {
         ws_endpoint,
     )
     .await.unwrap().0;
+    let operators_info = operators_info_service.get_operator_info(Address::from_str(operator_address).unwrap()).await.unwrap();
+    info!("Operators info: {:?}", operators_info);
     let token = tokio_util::sync::CancellationToken::new();
-    let avs_registry_service_chaincaller = AvsRegistryServiceChainCaller::new(
-        avs_registry_reader.clone(),
-        operators_info_service.clone(),
-    );
-
     let current_block_number = provider.get_block_number().await.unwrap();
+    let operators_info_service_clone = operators_info_service.clone();
     tokio::spawn(async move {
         let _ = operators_info_service
             .start_service(&token, 0, current_block_number)
             .await;
     });
+    let avs_registry_service_chaincaller = AvsRegistryServiceChainCaller::new(
+        avs_registry_reader,
+        operators_info_service_clone,
+    );
+    let quorums_avs_state = avs_registry_service_chaincaller.get_quorums_avs_state_at_block(&quorum_nums, current_block_num as u32).await.unwrap();
+    info!("Quorums avs state: {:?}", quorums_avs_state);
+    let operators_avs_state = avs_registry_service_chaincaller.get_operators_avs_state_at_block(current_block_num as u32, &quorum_nums).await.unwrap();
+    info!("Operators avs state: {:?}", operators_avs_state);
+    let get_check_signatures_indices = avs_registry_service_chaincaller.get_check_signatures_indices(current_block_num as u32, quorum_nums.to_vec(), vec![]).await.unwrap();
+    info!("Get check signatures indices: {:?}", get_check_signatures_indices.nonSignerQuorumBitmapIndices);
+    info!("Get check signatures indices: {:?}", get_check_signatures_indices.totalStakeIndices);
+
 
 
     let bls_agg_service = BlsAggregatorService::new(
         avs_registry_service_chaincaller,
         get_logger()
     );
-
-    // Create a channel for coordinating shutdown
-    let (tx, _rx) = tokio::sync::mpsc::channel(1);
-    let tx_clone = tx.clone();
-    let signed_task_response = SignedTaskResponseDigest {
-        task_response_digest: TaskResponseDigest::from(commitment_hash.parse::<FixedBytes<32>>().unwrap()),
-        bls_signature: Signature::new(parse_signature(signature)),
-        operator_id: FixedBytes::from_str(operator_id).unwrap(),
-        signature_verification_channel: tx,
-    };
 
 
     // Initialize the task
@@ -255,9 +264,9 @@ async fn aggregate_sigs(input: String) -> Json<serde_json::Value> {
     let process_result = bls_agg_service
         .process_new_signature(TaskSignature::new(
             task_index as u32,
-            signed_task_response.task_response_digest,
-            signed_task_response.bls_signature,
-            signed_task_response.operator_id
+            TaskResponseDigest::from(commitment_hash.parse::<FixedBytes<32>>().unwrap()),
+            Signature::new(parse_signature(signature)),
+            FixedBytes::from_str(operator_id).unwrap(),
         ))
         .await;
     info!("Process result: {:?}", process_result);
@@ -273,7 +282,6 @@ async fn aggregate_sigs(input: String) -> Json<serde_json::Value> {
             ).await {
                 Ok(Some(Ok(response))) => {
                     debug!("BLS aggregation response: {:?}", response);
-                    tx_clone.send(Ok(())).await.unwrap();
                     // Convert to stringified format
                     let stringified = serde_json::json!({
                         "task_index": response.task_index,
