@@ -32,6 +32,7 @@ while true; do
     else
         
         node_url=${node_url#http://}
+	node_url="${node_url}.test-deploy.svc.cluster.local"
         echo "Running prover with node_url: $node_url"
         /usr/bin/prover $node_url 7047
         
