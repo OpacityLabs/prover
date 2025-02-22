@@ -1,5 +1,5 @@
-FROM rust 
-RUN apt-get update && apt-get install -y curl jq 
+FROM rust
+RUN apt-get update && apt-get install -y curl jq musl-dev
 RUN curl -L https://foundry.paradigm.xyz | bash
 RUN ~/.foundry/bin/foundryup 
 
