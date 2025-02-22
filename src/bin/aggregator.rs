@@ -214,16 +214,17 @@ async fn aggregate_sigs(input: String) -> Json<serde_json::Value> {
         ws_endpoint,
     )
     .await.unwrap().0;
-    let operators_info = operators_info_service.get_operator_info(Address::from_str(operator_address).unwrap()).await.unwrap();
-    info!("Operators info: {:?}", operators_info);
     let token = tokio_util::sync::CancellationToken::new();
     let current_block_number = provider.get_block_number().await.unwrap();
     let operators_info_service_clone = operators_info_service.clone();
     tokio::spawn(async move {
         let _ = operators_info_service
-            .start_service(&token, 0, current_block_number)
-            .await;
+        .start_service(&token, current_block_number-1000, current_block_number)
+        .await;
     });
+    sleep(Duration::from_secs(60)).await;
+    let operators_info = operators_info_service_clone.get_operator_info(Address::from_str(operator_address).unwrap()).await.unwrap();
+    info!("Operators info: {:?}", operators_info);
     let avs_registry_service_chaincaller = AvsRegistryServiceChainCaller::new(
         avs_registry_reader,
         operators_info_service_clone,
