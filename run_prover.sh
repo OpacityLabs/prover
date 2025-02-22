@@ -3,6 +3,7 @@
 # Clean up any existing flag files at startup
 rm -f /tmp/quorum_updated
 
+namespace=$NAMESPACE
 debug_mode=false
 counter=0
 address=$(~/.foundry/bin/cast wallet address $PRIVATE_KEY)
@@ -32,7 +33,7 @@ while true; do
     else
         
         node_url=${node_url#http://}
-	node_url="${node_url}.test-deploy.svc.cluster.local"
+	node_url="${node_url}.${namespace}.svc.cluster.local"
         echo "Running prover with node_url: $node_url"
         /usr/bin/prover $node_url 7047
         
