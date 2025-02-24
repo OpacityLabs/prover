@@ -30,6 +30,7 @@ use axum::{
     routing::post,
     Json,
     Router,
+    extract::State,
 };
 use tracing::{info, debug, error};
 use tokio_util::sync::CancellationToken;
@@ -67,8 +68,52 @@ async fn main() {
 
 pub async fn run_aggregator() -> eyre::Result<()> {
     init_logger(eigen_logging::log_level::LogLevel::Info);
+
+    // Get RPC URLs from env
+    let http_endpoint = env::var("RPC_URL")
+        .expect("RPC_URL must be set");
+    let ws_endpoint = env::var("WEBSOCKET_RPC_URL")
+        .expect("WEBSOCKET_RPC_URL must be set");
+    let registry_coordinator_address: Address = Address::from_str(
+        &env::var("REGISTRY_COORDINATOR_ADDRESS")
+            .expect("REGISTRY_COORDINATOR_ADDRESS must be set")
+    ).unwrap();
+    let operator_state_retriever_address: Address = Address::from_str(
+        &env::var("OPERATOR_STATE_RETRIEVER_ADDRESS")
+            .expect("OPERATOR_STATE_RETRIEVER_ADDRESS must be set")
+    ).unwrap();
+
+    // Initialize provider and get current block
+    let provider: RootProvider<_, Ethereum> = RootProvider::new_http(Url::parse(&http_endpoint).unwrap());
+    let current_block_number = provider.get_block_number().await.unwrap();
+
+    // Initialize AVS registry reader
+    let avs_registry_reader = AvsRegistryChainReader::new(
+        get_logger().clone(),
+        registry_coordinator_address,
+        operator_state_retriever_address,
+        http_endpoint.clone(),
+    ).await.unwrap();
+
+    // Initialize operator info service
+    let operators_info_service = OperatorInfoServiceInMemory::new(
+        get_logger(),
+        avs_registry_reader.clone(),
+        ws_endpoint,
+    ).await.unwrap().0;
+
+    // Start the operator info service
+    let token = CancellationToken::new();
+    let operators_info_service_clone = operators_info_service.clone();
+    tokio::spawn(async move {
+        let _ = operators_info_service_clone
+            .start_service(&token, current_block_number-1000, current_block_number)
+            .await;
+    });
+
     let app = Router::new()
-        .route("/aggregate", post(aggregate_sigs));
+        .route("/aggregate", post(aggregate_sigs))
+        .with_state(operators_info_service);
 
     info!("Starting aggregator server on port 5074...");
     
@@ -82,7 +127,10 @@ pub async fn run_aggregator() -> eyre::Result<()> {
     Ok(())
 }
 
-async fn aggregate_sigs(input: String) -> Json<serde_json::Value> {
+async fn aggregate_sigs(
+    State(operators_info_service): State<OperatorInfoServiceInMemory>,
+    input: String
+) -> Json<serde_json::Value> {
     info!("Aggregating signatures...");
     
     // First parse to get the outer JSON structure
@@ -187,63 +235,18 @@ async fn aggregate_sigs(input: String) -> Json<serde_json::Value> {
         operator_state_retriever_address,
         http_endpoint.clone(),
     ).await.unwrap();
-    // let quorums_avs_state = avs_registry_reader.get_quorums_avs_state_at_block(quorum_nums.to_vec(), current_block_num as u32).await.unwrap();
-    // info!("Quorums avs state: {:?}", quorums_avs_state);
-    let operators_stake = avs_registry_reader.get_operators_stake_in_quorums_at_block(current_block_num as u32, quorum_nums.clone()).await.unwrap();
-    info!("Operators stake");
-    info!("Number of operators: {}", operators_stake.len());
-    info!("First operator stake: {:?}", operators_stake[0][0].stake);
-    info!("First operator stake: {:?}", operators_stake[0][1].stake);
-    info!("First operator stake: {:?}", operators_stake[0][2].stake);
-    let get_check_signatures_indices = avs_registry_reader.get_check_signatures_indices(current_block_num as u32, quorum_nums.to_vec(), vec![]).await.unwrap();
-    info!("Get check signatures indices: {:?}", get_check_signatures_indices.nonSignerQuorumBitmapIndices);
-    info!("Get check signatures indices: {:?}", get_check_signatures_indices.totalStakeIndices);
-    
-    let operator_id_mock = avs_registry_reader.get_operator_id(Address::from_str(operator_address).unwrap()).await.unwrap();
-    info!("Operator id mock: {:?}", operator_id_mock);
-    // let get_quorums_avs_state_at_block = avs_registry_reader.get_quorums_avs_state_at_block(quorum_nums.to_vec(), current_block_num as u32).await.unwrap();
-    // info!("Get quorums avs state at block: {:?}", get_quorums_avs_state_at_block);
-    // let (operators_info, _rx) = OperatorInfoServiceInMemory::new(
-    //     get_logger(),
-    //     avs_registry_reader.clone(),
-    //     ws_endpoint,
-    // ).await.unwrap();
-    let operators_info_service = OperatorInfoServiceInMemory::new(
-        get_logger(),
-        avs_registry_reader.clone(),
-        ws_endpoint,
-    )
-    .await.unwrap().0;
-    let token = tokio_util::sync::CancellationToken::new();
-    let current_block_number = provider.get_block_number().await.unwrap();
-    let operators_info_service_clone = operators_info_service.clone();
-    tokio::spawn(async move {
-        let _ = operators_info_service
-        .start_service(&token, current_block_number-1000, current_block_number)
-        .await;
-    });
-    sleep(Duration::from_secs(60)).await;
-    let operators_info = operators_info_service_clone.get_operator_info(Address::from_str(operator_address).unwrap()).await.unwrap();
+
+    let operators_info = operators_info_service.get_operator_info(Address::from_str(operator_address).unwrap()).await.unwrap();
     info!("Operators info: {:?}", operators_info);
     let avs_registry_service_chaincaller = AvsRegistryServiceChainCaller::new(
         avs_registry_reader,
-        operators_info_service_clone,
+        operators_info_service,
     );
-    let quorums_avs_state = avs_registry_service_chaincaller.get_quorums_avs_state_at_block(&quorum_nums, current_block_num as u32).await.unwrap();
-    info!("Quorums avs state: {:?}", quorums_avs_state);
-    let operators_avs_state = avs_registry_service_chaincaller.get_operators_avs_state_at_block(current_block_num as u32, &quorum_nums).await.unwrap();
-    info!("Operators avs state: {:?}", operators_avs_state);
-    let get_check_signatures_indices = avs_registry_service_chaincaller.get_check_signatures_indices(current_block_num as u32, quorum_nums.to_vec(), vec![]).await.unwrap();
-    info!("Get check signatures indices: {:?}", get_check_signatures_indices.nonSignerQuorumBitmapIndices);
-    info!("Get check signatures indices: {:?}", get_check_signatures_indices.totalStakeIndices);
-
-
 
     let bls_agg_service = BlsAggregatorService::new(
         avs_registry_service_chaincaller,
         get_logger()
     );
-
 
     // Initialize the task
     info!("Initializing task...");
