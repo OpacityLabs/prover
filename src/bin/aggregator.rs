@@ -1,19 +1,21 @@
 use ark_bn254::g1::G1Affine;
+use eigen_services_avsregistry::AvsRegistryService;
+use eigen_services_operatorsinfo::operator_info::OperatorInfoService;
 use num::bigint::BigUint;
-use eigen_services_blsaggregation::bls_agg::BlsAggregatorService;
-use eigen_client_avsregistry::reader::AvsRegistryChainReader;
+use eigen_services_blsaggregation::bls_agg::{BlsAggregatorService, TaskMetadata, TaskSignature};
+use eigen_client_avsregistry::reader::{AvsRegistryChainReader, AvsRegistryReader};
 use eigen_logging::{get_logger, init_logger};
+use alloy_provider::{Provider,RootProvider};
 use eigen_logging::logger::Logger;
 use eigen_logging::noop_logger::NoopLogger;
 use eigen_services_avsregistry::chaincaller::AvsRegistryServiceChainCaller;
 use eigen_services_operatorsinfo::operatorsinfo_inmemory::OperatorInfoServiceInMemory;
 use eigen_crypto_bls::Signature;
 use eigen_types::{
-    avs::TaskResponseDigest,
+    avs::{TaskIndex, TaskResponseDigest, SignedTaskResponseDigest},
     operator::QuorumThresholdPercentages,
 };
 use alloy_primitives::{Address, Bytes, FixedBytes, address};
-use alloy_provider::{Provider, RootProvider};
 use alloy_network::Ethereum;
 use url::Url;
 use std::time::Duration;
@@ -28,6 +30,7 @@ use axum::{
     routing::post,
     Json,
     Router,
+    extract::State,
 };
 use tracing::{info, debug, error};
 use tokio_util::sync::CancellationToken;
@@ -65,8 +68,52 @@ async fn main() {
 
 pub async fn run_aggregator() -> eyre::Result<()> {
     init_logger(eigen_logging::log_level::LogLevel::Info);
+
+    // Get RPC URLs from env
+    let http_endpoint = env::var("RPC_URL")
+        .expect("RPC_URL must be set");
+    let ws_endpoint = env::var("WEBSOCKET_RPC_URL")
+        .expect("WEBSOCKET_RPC_URL must be set");
+    let registry_coordinator_address: Address = Address::from_str(
+        &env::var("REGISTRY_COORDINATOR_ADDRESS")
+            .expect("REGISTRY_COORDINATOR_ADDRESS must be set")
+    ).unwrap();
+    let operator_state_retriever_address: Address = Address::from_str(
+        &env::var("OPERATOR_STATE_RETRIEVER_ADDRESS")
+            .expect("OPERATOR_STATE_RETRIEVER_ADDRESS must be set")
+    ).unwrap();
+
+    // Initialize provider and get current block
+    let provider: RootProvider<_, Ethereum> = RootProvider::new_http(Url::parse(&http_endpoint).unwrap());
+    let current_block_number = provider.get_block_number().await.unwrap();
+
+    // Initialize AVS registry reader
+    let avs_registry_reader = AvsRegistryChainReader::new(
+        get_logger().clone(),
+        registry_coordinator_address,
+        operator_state_retriever_address,
+        http_endpoint.clone(),
+    ).await.unwrap();
+
+    // Initialize operator info service
+    let operators_info_service = OperatorInfoServiceInMemory::new(
+        get_logger(),
+        avs_registry_reader.clone(),
+        ws_endpoint,
+    ).await.unwrap().0;
+
+    // Start the operator info service
+    let token = CancellationToken::new();
+    let operators_info_service_clone = operators_info_service.clone();
+    tokio::spawn(async move {
+        let _ = operators_info_service_clone
+            .start_service(&token, current_block_number-1000, current_block_number)
+            .await;
+    });
+
     let app = Router::new()
-        .route("/aggregate", post(aggregate_sigs));
+        .route("/aggregate", post(aggregate_sigs))
+        .with_state(operators_info_service);
 
     info!("Starting aggregator server on port 5074...");
     
@@ -80,7 +127,10 @@ pub async fn run_aggregator() -> eyre::Result<()> {
     Ok(())
 }
 
-async fn aggregate_sigs(input: String) -> Json<serde_json::Value> {
+async fn aggregate_sigs(
+    State(operators_info_service): State<OperatorInfoServiceInMemory>,
+    input: String
+) -> Json<serde_json::Value> {
     info!("Aggregating signatures...");
     
     // First parse to get the outer JSON structure
@@ -172,9 +222,10 @@ async fn aggregate_sigs(input: String) -> Json<serde_json::Value> {
     info!("WebSocket URL: {}", ws_endpoint);
 
     let provider: RootProvider<_, Ethereum> = RootProvider::new_http(Url::parse(&http_endpoint).unwrap());
+    // let provider = Provider::new_http(Url::parse(&http_endpoint).unwrap());
     let current_block_num = provider.get_block_number().await.unwrap();
-    let quorum_nums = Bytes::from([0u8]);
-    let quorum_threshold_percentages: QuorumThresholdPercentages = vec![33];
+    let quorum_nums = Bytes::from([0x00]);
+    let quorum_threshold_percentages: QuorumThresholdPercentages = vec![0];
     let time_to_expiry = Duration::from_secs(1000);
 
     // Create avs clients to interact with contracts deployed on anvil
@@ -185,72 +236,44 @@ async fn aggregate_sigs(input: String) -> Json<serde_json::Value> {
         http_endpoint.clone(),
     ).await.unwrap();
 
-    let (operators_info, _rx) = OperatorInfoServiceInMemory::new(
-        get_logger(),
-        avs_registry_reader.clone(),
-        ws_endpoint,
-    ).await.unwrap();
-
-    // Create a channel for coordinating shutdown
-    let (tx, mut rx) = tokio::sync::mpsc::channel(1);
-    let cancellation_token: CancellationToken = CancellationToken::new();
-    let token_clone = cancellation_token.clone();
-    let operators_info_clone = operators_info.clone();
-
-    // Spawn the operator info service
-    task::spawn(async move { 
-        let _ = operators_info_clone.start_service(&token_clone, current_block_num - 100 as u64, 0).await;
-        let _ = tx.send(()).await;  // Signal that the service has stopped
-    });
-
-    info!("waiting for services to initialize...");
-    sleep(Duration::from_secs(2)).await;
-
-    let avs_registry_service = AvsRegistryServiceChainCaller::new(
-        avs_registry_reader.clone(), 
-        operators_info.clone()
+    let operators_info = operators_info_service.get_operator_info(Address::from_str(operator_address).unwrap()).await.unwrap();
+    info!("Operators info: {:?}", operators_info);
+    let avs_registry_service_chaincaller = AvsRegistryServiceChainCaller::new(
+        avs_registry_reader,
+        operators_info_service,
     );
 
-    let logger: Arc<dyn Logger> = Arc::new(NoopLogger {});
     let bls_agg_service = BlsAggregatorService::new(
-        avs_registry_service.clone(),
-        logger
+        avs_registry_service_chaincaller,
+        get_logger()
     );
 
     // Initialize the task
     info!("Initializing task...");
-    debug!("Task index: {:?}", task_index);
-    debug!("Current block number: {:?}", current_block_num);
-    debug!("Quorum nums: {:?}", quorum_nums);
-    debug!("Quorum threshold percentages: {:?}", quorum_threshold_percentages);
-    debug!("Time to expiry: {:?}", time_to_expiry);
+    let task_metadata = TaskMetadata::new(
+        task_index as u32,
+        current_block_num as u64,
+        quorum_nums.to_vec(),
+        quorum_threshold_percentages,
+        time_to_expiry
+    );
+
     bls_agg_service
-        .initialize_new_task(
-            task_index as u32,
-            current_block_num as u32,
-            quorum_nums.to_vec(),
-            quorum_threshold_percentages,
-            time_to_expiry,
-        )
+        .initialize_new_task(task_metadata)
         .await
         .unwrap();
-
-    info!("Processing signature...");
-    debug!("Task index: {:?}", task_index);
-    debug!("Commitment hash: {:?}", commitment_hash);
-    debug!("Signature: {:?}", signature);
-    debug!("Operator ID: {:?}", operator_id);
     
+    info!("Processing signature...");
     // Process the signature
     let process_result = bls_agg_service
-        .process_new_signature(
+        .process_new_signature(TaskSignature::new(
             task_index as u32,
             TaskResponseDigest::from(commitment_hash.parse::<FixedBytes<32>>().unwrap()),
             Signature::new(parse_signature(signature)),
             FixedBytes::from_str(operator_id).unwrap(),
-        )
+        ))
         .await;
-
+    info!("Process result: {:?}", process_result);
     match process_result {
         Ok(_) => {
             info!("Successfully processed signature");
@@ -263,7 +286,6 @@ async fn aggregate_sigs(input: String) -> Json<serde_json::Value> {
             ).await {
                 Ok(Some(Ok(response))) => {
                     debug!("BLS aggregation response: {:?}", response);
-                    cancellation_token.cancel();
                     // Convert to stringified format
                     let stringified = serde_json::json!({
                         "task_index": response.task_index,
@@ -294,24 +316,21 @@ async fn aggregate_sigs(input: String) -> Json<serde_json::Value> {
                 }
                 Ok(Some(Err(e))) => {
                     error!("Error in aggregation response: {:?}", e);
-                    cancellation_token.cancel();
                     Json(serde_json::Value::default())
                 }
                 Ok(None) => {
                     error!("Aggregation channel closed without response");
-                    cancellation_token.cancel();
+                    
                     Json(serde_json::Value::default())
                 }
                 Err(_) => {
                     error!("Timeout waiting for aggregation response");
-                    cancellation_token.cancel();
                     Json(serde_json::Value::default())
                 }
             }
         }
         Err(e) => {
             error!("Failed to process signature: {:?}", e);
-            cancellation_token.cancel();
             Json(serde_json::Value::default())
         }
     }

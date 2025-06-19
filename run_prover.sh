@@ -2,8 +2,7 @@
 
 # Clean up any existing flag files at startup
 rm -f /tmp/quorum_updated
-
-debug_mode=false
+debug_mode=true
 counter=0
 address=$(~/.foundry/bin/cast wallet address $PRIVATE_KEY)
 platform=api.cloudflare.com
@@ -15,22 +14,59 @@ echo "starting aggregator"
 /usr/bin/aggregator &
 echo "starting prover"
 while true; do
-    node_selector_response=$(curl -X POST -H "Content-Type: application/json" -d '{
-        "address": "'"$address"'",
-        "platform": "'"$platform"'",
-        "resource": "'"$resource"'",
-        "value": "'"$value"'",
-        "threshold": '"$threshold"',
-        "signature": "'"$signature"'"
-    }' "$NODE_SELECTOR")
-    node_url=$(echo $node_selector_response | jq -r '.node_url')
-    task_index=$(echo $node_selector_response | jq -r '.task_index')
-    echo "Task index: $task_index"
+    echo "########################################################"
+    echo "~~~~~~~~~~~~~   STARTING NEW ATTESTATION   ~~~~~~~~~~~~~"
+    echo "########################################################"
+    # Add random operator count selection
+    operator_count=$((RANDOM % 3 + 1))
+    echo "operator_count for this notorization: $operator_count"
+    threshold=$((33 * operator_count))
+    signature=$(~/.foundry/bin/cast wallet sign --private-key $PRIVATE_KEY $platform$resource$value$threshold)
+    
+    # Initialize counter for successful proofs in this batch
+    successful_proofs=0
+    
+    # Outer loop runs until we get enough successful proofs
+    while [ $successful_proofs -lt $operator_count ]; do
+    echo "########################################################"
+    echo "                starting new notarization"
+    echo "########################################################"
+                # Prepare request data with conditional task_index
+        request_data='{
+            "address": "'"$address"'",
+            "platform": "'"$platform"'",
+            "resource": "'"$resource"'",
+            "value": "'"$value"'",
+            "threshold": '"$threshold"',
+            "signature": "'"$signature"'",
+            "operator_count": '"$operator_count"'
+        }'
         
-    if [ -z "$node_url" ] || [ "$node_url" == "null" ]; then
-        echo "Failed to get a valid node_url. Retrying in 5 seconds..."
-    else
+        # Add task_index to request if we have one
+        if [ ! -z "$task_index" ]; then
+            request_data=$(echo $request_data | jq '. + {"task_index": '"$task_index"'}')
+        fi
         
+        node_selector_response=$(curl -X POST -H "Content-Type: application/json" -d "$request_data" "$NODE_SELECTOR")
+        
+        # Extract node_url and task_index from response
+        node_url=$(echo $node_selector_response | jq -r '.node_url')
+        new_task_index=$(echo $node_selector_response | jq -r '.task_index')
+        
+        # Store task_index if this is our first request
+        if [ -z "$task_index" ]; then
+            task_index=$new_task_index
+        fi
+        
+        echo "Task index: $task_index"
+        echo "node_url: $node_url"
+        echo "node_selector_response: $node_selector_response"
+        if [ -z "$node_url" ] || [ "$node_url" == "null" ]; then
+            echo "Failed to get a valid node_url. Retrying in 5 seconds..."
+            sleep 5
+            continue
+        fi
+            
         node_url=${node_url#http://}
         echo "Running prover with node_url: $node_url"
         /usr/bin/prover $node_url 7047
@@ -99,7 +135,15 @@ while true; do
 
             # Send to aggregator and capture its response
             aggregator_response=$(curl -X POST -d "$response" http://127.0.0.1:5074/aggregate)
+            successful_proofs=$((successful_proofs + 1))
+            echo "Successful proof $successful_proofs of $operator_count"
 
+            
+            # Process successful aggregation response
+                else 
+                    echo "Request failed"
+                fi
+            done
             # Check for aggregator errors
             if [ -z "$aggregator_response" ] || \
                [ "$aggregator_response" = "{}" ] || \
@@ -163,7 +207,7 @@ while true; do
             QUORUM_NUMBERS="0x00"
 
             # Get current block and set reference block
-            CURRENT_BLOCK=$(~/.foundry/bin/cast block latest --rpc-url $RPC_URL | grep "number" | awk '{print $2}')
+            CURRENT_BLOCK=$(~/.foundry/bin/cast block latest --rpc-url http://ethereum:8545 | grep "number" | awk '{print $2}')
             REF_BLOCK_NUMBER=$((CURRENT_BLOCK-1))
             
             # Check if we've already updated quorum (using a flag file in /tmp)
@@ -194,8 +238,7 @@ while true; do
                 
                 if [ -n "$operator_address_list" ]; then
                     # Construct and execute the cast command
-                    cast_command="~/.foundry/bin/cast send $REGISTRY_COORDINATOR_ADDRESS --private-key $PRIVATE_KEY \"updateOperatorsForQuorum(address[][],bytes)\" [[${operator_address_list}]] 0x00 --rpc-url $RPC_URL"
-                    
+                    cast_command="~/.foundry/bin/cast send $REGISTRY_COORDINATOR_ADDRESS --private-key $PRIVATE_KEY \"updateOperatorsForQuorum(address[][],bytes)\" [[${operator_address_list}]] 0x00 --rpc-url $RPC_URL"                    
                     echo "Executing cast command..."
                     eval "$cast_command"
                     
@@ -211,6 +254,8 @@ while true; do
 
             # Execute checkSignatures call
             echo "verifying signature onchain..."
+
+            echo 'cast send $BLS_SIGNATURE_CHECKER_ADDRESS "checkSignatures(bytes32,bytes,uint32,(uint32[],(uint256,uint256)[],(uint256,uint256)[],(uint256[2],uint256[2]),(uint256,uint256),uint32[],uint32[],uint32[][]))" $MSG_HASH $QUORUM_NUMBERS $REF_BLOCK_NUMBER "([$BITMAP_INDICES_ARR],[$PUBLIC_KEYS_ARR],[($APK_G1_X,$APK_G1_Y)],([$APK_G2_X1,$APK_G2_X2],[$APK_G2_Y1,$APK_G2_Y2]),($SIG_G1_X,$SIG_G1_Y),[$QUORUM_APK_INDICES],[$TOTAL_STAKE_INDICES],[[$STAKE_INDICES_ARR]])" --rpc-url $RPC_URL --private-key $PRIVATE_KEY) '
 
             sig_verification=$(~/.foundry/bin/cast send $BLS_SIGNATURE_CHECKER_ADDRESS \
             "checkSignatures(bytes32,bytes,uint32,(uint32[],(uint256,uint256)[],(uint256,uint256)[],(uint256[2],uint256[2]),(uint256,uint256),uint32[],uint32[],uint32[][]))" \
@@ -228,10 +273,5 @@ while true; do
             --rpc-url $RPC_URL \
             --private-key $PRIVATE_KEY)
             echo "Signature Verification: $sig_verification"
-
-        else 
-            echo "Request failed"
-        fi
-    fi
-    sleep 5
+            task_index=""
 done 
