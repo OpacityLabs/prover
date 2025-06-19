@@ -6,9 +6,9 @@ rm -f /tmp/quorum_updated
 debug_mode=false
 counter=0
 address=$(~/.foundry/bin/cast wallet address $PRIVATE_KEY)
-platform=api.cloudflare.com
-resource=model
-value=gpt-4o-mini
+platform=api.texturehq.com
+resource=manufacturerDeviceId
+value=411919678532
 threshold=1 
 signature=$(~/.foundry/bin/cast wallet sign --private-key $PRIVATE_KEY $platform$resource$value$threshold)
 echo "starting aggregator"
