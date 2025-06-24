@@ -15,6 +15,7 @@ echo "starting aggregator"
 /usr/bin/aggregator &
 echo "starting prover"
 while true; do
+    sleep 360 
     node_selector_response=$(curl -X POST -H "Content-Type: application/json" -d '{
         "address": "'"$address"'",
         "platform": "'"$platform"'",
