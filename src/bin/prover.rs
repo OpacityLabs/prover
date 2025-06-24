@@ -27,16 +27,9 @@ struct NotarizationRequest {
 
 const NOTARIZATION_REQUEST_STR: &str = r###"
 {
-    "host":"https://api.texturehq.com",
+    "host":"api.texturehq.com",
     "path":"/v1/devices/cmbf4nm7tdn51imt2g1l26qqh",
-    "headers":[
-        ["Accept-Encoding","Identity"],
-        ["Host","https://api.texturehq.com"],
-        ["Connection","close"],
-        ["User-Agent","Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15"],
-        ["Texture-Api-Key","server_8f4d5c917d01c5a65621458d04393bbe"],
-        ["Accept","application/json"]
-    ],
+    "headers":[["Accept-Encoding","Identity"],["Host","api.texturehq.com"],["Connection","close"],["User-Agent","Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15"],["Texture-Api-Key","server_8f4d5c917d01c5a65621458d04393bbe"]],
     "redact_string":"server_8f4d5c917d01c5a65621458d04393bbe"
 }
 "###;
