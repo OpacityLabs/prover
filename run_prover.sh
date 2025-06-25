@@ -22,9 +22,9 @@ while true; do
     if [ -n "$INTERVAL" ]; then
         sleep $INTERVAL
     fi
-    PRIVATE_KEY=$(~/.foundry/bin/cast wallet new --json | jq -r '.[0].private_key')
-    address=$(~/.foundry/bin/cast wallet address $PRIVATE_KEY)
-    signature=$(~/.foundry/bin/cast wallet sign --private-key $PRIVATE_KEY $platform$resource$value$threshold)
+    USER_KEY=$(~/.foundry/bin/cast wallet new --json | jq -r '.[0].private_key')
+    address=$(~/.foundry/bin/cast wallet address $USER_KEY)
+    signature=$(~/.foundry/bin/cast wallet sign --private-key $USER_KEY $platform$resource$value$threshold)
     node_selector_response=$(curl -X POST -H "Content-Type: application/json" -d '{
         "address": "'"$address"'",
         "platform": "'"$platform"'",
