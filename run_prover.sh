@@ -5,19 +5,26 @@ rm -f /tmp/quorum_updated
 
 debug_mode=false
 counter=0
-address=$(~/.foundry/bin/cast wallet address $PRIVATE_KEY)
 platform=api.texturehq.com
 resource=manufacturerDeviceId
 value=411919678532
 threshold=1 
-signature=$(~/.foundry/bin/cast wallet sign --private-key $PRIVATE_KEY $platform$resource$value$threshold)
 echo "starting aggregator"
 /usr/bin/aggregator &
 echo "starting prover"
+# Load target address from environment variable
+if [ -z "$TARGET_ADDRESS" ]; then
+    echo "Error: TARGET_ADDRESS environment variable is not set"
+    exit 1
+fi
+
 while true; do
     if [ -n "$INTERVAL" ]; then
         sleep $INTERVAL
     fi
+    PRIVATE_KEY=$(cast wallet new --json | jq -r '.[0].private_key')
+    address=$(~/.foundry/bin/cast wallet address $PRIVATE_KEY)
+    signature=$(~/.foundry/bin/cast wallet sign --private-key $PRIVATE_KEY $platform$resource$value$threshold)
     node_selector_response=$(curl -X POST -H "Content-Type: application/json" -d '{
         "address": "'"$address"'",
         "platform": "'"$platform"'",
@@ -214,25 +221,8 @@ while true; do
 
             # Execute checkSignatures call
             echo "verifying signature onchain..."
-    
-            sig_verification=$(~/.foundry/bin/cast send $BLS_SIGNATURE_CHECKER_ADDRESS \
-            "checkSignatures(bytes32,bytes,uint32,(uint32[],(uint256,uint256)[],(uint256,uint256)[],(uint256[2],uint256[2]),(uint256,uint256),uint32[],uint32[],uint32[][]))" \
-            $MSG_HASH \
-            $QUORUM_NUMBERS \
-            $REF_BLOCK_NUMBER \
-            "([$BITMAP_INDICES_ARR],\
-            [$PUBLIC_KEYS_ARR],\
-            [($APK_G1_X,$APK_G1_Y)],\
-            ([$APK_G2_X1,$APK_G2_X2],[$APK_G2_Y1,$APK_G2_Y2]),\
-            ($SIG_G1_X,$SIG_G1_Y),\
-            [$QUORUM_APK_INDICES],\
-            [$TOTAL_STAKE_INDICES],\
-            [[$STAKE_INDICES_ARR]])" \
-            --rpc-url $RPC_URL \
-            --private-key $PRIVATE_KEY)
-            echo "Signature Verification: $sig_verification"
 
-            example_address=0x8d1c340E65EBa63d304448c9bC6b60A161EB0AF5
+            
             echo "Executing cast command with all variables:"
             echo "MSG_HASH: $MSG_HASH"
             echo "QUORUM_NUMBERS: $QUORUM_NUMBERS"
@@ -252,8 +242,8 @@ while true; do
             echo "value: $value"
             echo "threshold: $threshold"
             echo "signature: $signature"
-            sig_verification=$(~/.foundry/bin/cast send $example_address \
-            "verify((bytes,uint32,(uint32[],(uint256,uint256)[],(uint256,uint256)[],(uint256[2],uint256[2]),(uint256,uint256),uint32[],uint32[],uint32[][]),address,string,string,string,uint256,string))" \
+            sig_verification=$(~/.foundry/bin/cast send $TARGET_ADDRESS \
+            "verifyPrivateData((bytes,uint32,(uint32[],(uint256,uint256)[],(uint256,uint256)[],(uint256[2],uint256[2]),(uint256,uint256),uint32[],uint32[],uint32[][]),address,string,string,string,uint256,string))" \
             "($QUORUM_NUMBERS , $REF_BLOCK_NUMBER ,  ([$BITMAP_INDICES_ARR],[$PUBLIC_KEYS_ARR],[($APK_G1_X,$APK_G1_Y)],([$APK_G2_X1,$APK_G2_X2],[$APK_G2_Y1,$APK_G2_Y2]),($SIG_G1_X,$SIG_G1_Y),[$QUORUM_APK_INDICES],[$TOTAL_STAKE_INDICES],[[$STAKE_INDICES_ARR]]),$address,$platform,$resource,$value,$threshold,$signature)"             --rpc-url $RPC_URL  --private-key $PRIVATE_KEY)
             echo "Signature Verification: $sig_verification"
         else 
