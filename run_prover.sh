@@ -15,7 +15,9 @@ echo "starting aggregator"
 /usr/bin/aggregator &
 echo "starting prover"
 while true; do
-    sleep 360 
+    if [ -n "$INTERVAL" ]; then
+        sleep $INTERVAL
+    fi
     node_selector_response=$(curl -X POST -H "Content-Type: application/json" -d '{
         "address": "'"$address"'",
         "platform": "'"$platform"'",
@@ -212,7 +214,7 @@ while true; do
 
             # Execute checkSignatures call
             echo "verifying signature onchain..."
-
+    
             sig_verification=$(~/.foundry/bin/cast send $BLS_SIGNATURE_CHECKER_ADDRESS \
             "checkSignatures(bytes32,bytes,uint32,(uint32[],(uint256,uint256)[],(uint256,uint256)[],(uint256[2],uint256[2]),(uint256,uint256),uint32[],uint32[],uint32[][]))" \
             $MSG_HASH \
@@ -230,6 +232,30 @@ while true; do
             --private-key $PRIVATE_KEY)
             echo "Signature Verification: $sig_verification"
 
+            example_address=0x8d1c340E65EBa63d304448c9bC6b60A161EB0AF5
+            echo "Executing cast command with all variables:"
+            echo "MSG_HASH: $MSG_HASH"
+            echo "QUORUM_NUMBERS: $QUORUM_NUMBERS"
+            echo "REF_BLOCK_NUMBER: $REF_BLOCK_NUMBER"
+            echo "BITMAP_INDICES_ARR: $BITMAP_INDICES_ARR"
+            echo "PUBLIC_KEYS_ARR: $PUBLIC_KEYS_ARR"
+            echo "APK_G1_X: $APK_G1_X, APK_G1_Y: $APK_G1_Y"
+            echo "APK_G2_X1: $APK_G2_X1, APK_G2_X2: $APK_G2_X2"
+            echo "APK_G2_Y1: $APK_G2_Y1, APK_G2_Y2: $APK_G2_Y2"
+            echo "SIG_G1_X: $SIG_G1_X, SIG_G1_Y: $SIG_G1_Y"
+            echo "QUORUM_APK_INDICES: $QUORUM_APK_INDICES"
+            echo "TOTAL_STAKE_INDICES: $TOTAL_STAKE_INDICES"
+            echo "STAKE_INDICES_ARR: $STAKE_INDICES_ARR"
+            echo "address: $address"
+            echo "platform: $platform"
+            echo "resource: $resource"
+            echo "value: $value"
+            echo "threshold: $threshold"
+            echo "signature: $signature"
+            sig_verification=$(~/.foundry/bin/cast send $example_address \
+            "verify((bytes,uint32,(uint32[],(uint256,uint256)[],(uint256,uint256)[],(uint256[2],uint256[2]),(uint256,uint256),uint32[],uint32[],uint32[][]),address,string,string,string,uint256,string))" \
+            "($QUORUM_NUMBERS , $REF_BLOCK_NUMBER ,  ([$BITMAP_INDICES_ARR],[$PUBLIC_KEYS_ARR],[($APK_G1_X,$APK_G1_Y)],([$APK_G2_X1,$APK_G2_X2],[$APK_G2_Y1,$APK_G2_Y2]),($SIG_G1_X,$SIG_G1_Y),[$QUORUM_APK_INDICES],[$TOTAL_STAKE_INDICES],[[$STAKE_INDICES_ARR]]),$address,$platform,$resource,$value,$threshold,$signature)"             --rpc-url $RPC_URL  --private-key $PRIVATE_KEY)
+            echo "Signature Verification: $sig_verification"
         else 
             echo "Request failed"
         fi
